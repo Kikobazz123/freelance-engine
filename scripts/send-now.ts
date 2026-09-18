@@ -6,7 +6,6 @@
  *   tsx scripts/send-now.ts
  */
 import "dotenv/config";
-import { IDENTITY } from "../src/config.js";
 import { readFileSync } from "node:fs";
 import { sql, guard, getState, sentToday } from "../src/lib/db.js";
 import { gmailSend } from "../src/lib/gmail.js";
@@ -21,8 +20,28 @@ if (!g.send) { console.error("held, not sending"); process.exit(1); }
 
 const cap = await getState<number>("daily_cap_auto", 10);
 const already = await sentToday("auto");
-const remaining = Math.max(0, cap - already);
-console.log(`cap ${cap}/day · ${already} already sent today · ${remaining} slots left\n`);
+
+/**
+ * `--max N` overrides today's cap for this invocation only.
+ *
+ * Clearing a backlog by hand and the steady daily rate are different decisions.
+ * Raising daily_cap_auto would do both — the scheduled 05:45 run would inherit
+ * the higher number every morning after. This keeps the override where it
+ * belongs: on the one manual run that asked for it.
+ */
+const argv = process.argv.slice(2);
+const maxArg = argv.includes("--max") ? Number(argv[argv.indexOf("--max") + 1]) : null;
+if (maxArg !== null && (!Number.isInteger(maxArg) || maxArg <= 0)) {
+  console.error("--max needs a positive integer");
+  process.exit(1);
+}
+
+const remaining = maxArg ?? Math.max(0, cap - already);
+console.log(
+  maxArg !== null
+    ? `cap ${cap}/day OVERRIDDEN to ${maxArg} for this run · ${already} already sent today\n`
+    : `cap ${cap}/day · ${already} already sent today · ${remaining} slots left\n`,
+);
 if (remaining === 0) { console.log("daily cap reached"); process.exit(0); }
 
 const rows = (await sql`
@@ -38,9 +57,9 @@ const rows = (await sql`
 
 const seen = new Set<string>();
 const batch = rows.filter((r) => !seen.has(r.contact_email) && seen.add(r.contact_email));
-const cv = { filename: "cv.pdf",
+const cv = { filename: "Lordmark-Dorgu-AI-Automation-Engineer.pdf",
              contentType: "application/pdf",
-             data: readFileSync("cv/cv.pdf") };
+             data: readFileSync("cv/Lordmark-Dorgu-AI-Automation-Engineer.pdf") };
 
 let sent = 0, blocked = 0, failed = 0;
 const lines: string[] = [];
@@ -57,7 +76,7 @@ for (const r of batch) {
     const res = await gmailSend({
       to: r.contact_email, subject: c.subject,
       body: textLetter(sal, c.body), html: htmlLetter(sal, c.body),
-      fromName: IDENTITY.name, dryRun: false, attachment: cv,
+      fromName: "Lordmark Dorgu", dryRun: false, attachment: cv,
     });
     await sql`INSERT INTO sends (lane, channel, to_address, provider_msg_id, gmail_thread_id, dry_run)
               VALUES ('auto', ${r.source}, ${r.contact_email}, ${res?.id ?? null}, ${res?.threadId ?? null}, false)`;
@@ -80,6 +99,7 @@ console.log(`\nSENT ${sent} · blocked ${blocked} · failed ${failed} · ${left.
 await sendPlain(
   `${sent} applications sent, formatted as letters with your CV attached:\n\n` +
   lines.map((l) => "  " + l).join("\n") +
-  `\n\nDaily cap ${cap} reached. ${left.n} candidates remain for tomorrow.\n` +
+  `\n\n${maxArg !== null ? `Backlog run (cap override ${maxArg}).` : `Daily cap ${cap} reached.`}` +
+  ` ${left.n} candidates remain for tomorrow.\n` +
   `Replies will be flagged here automatically.`,
 );
