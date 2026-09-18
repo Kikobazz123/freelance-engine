@@ -84,14 +84,20 @@ export async function gmailSend(opts: {
   to: string;
   subject: string;
   body: string;
+  /** Optional HTML alternative. Sent as multipart/alternative alongside `body`. */
+  html?: string;
   from?: string;
+  fromName?: string;
   dryRun: boolean;
   attachment?: { filename: string; contentType: string; data: Buffer };
 }): Promise<{ id: string; threadId: string } | null> {
   if (opts.dryRun) return null;
 
-  const from = opts.from ?? process.env.GMAIL_SENDER;
-  if (!from) throw new Error("GMAIL_SENDER is not set");
+  const addr = opts.from ?? process.env.GMAIL_SENDER;
+  if (!addr) throw new Error("GMAIL_SENDER is not set");
+  // A display name makes the From read "Your Name <...>" rather than a bare
+  // address, which is what a person sending a letter looks like.
+  const from = opts.fromName ? `${opts.fromName} <${addr}>` : addr;
 
   // RFC 2047-encode a non-ASCII subject, or an em dash arrives as mojibake.
   const subject = /^[\x20-\x7E]*$/.test(opts.subject)
@@ -99,15 +105,71 @@ export async function gmailSend(opts: {
     : `=?UTF-8?B?${Buffer.from(opts.subject, "utf8").toString("base64")}?=`;
 
   const bodyB64 = b64(Buffer.from(opts.body, "utf8"));
-  let mime: string;
+  const rnd = () => Math.random().toString(36).slice(2, 10);
 
-  if (opts.attachment) {
-    const bnd = `bnd_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+  /**
+   * Nesting, when there is both HTML and an attachment:
+   *
+   *   multipart/mixed
+   *     multipart/alternative
+   *       text/plain          <- fallback
+   *       text/html           <- the letter
+   *     application/pdf       <- the CV
+   *
+   * Putting text/html as a sibling of the PDF inside mixed (rather than nested in
+   * alternative) makes some clients show the plain text AND the html as two
+   * visible parts.
+   */
+  const altPart = (bnd: string) => [
+    `Content-Type: multipart/alternative; boundary="${bnd}"`,
+    ``,
+    `--${bnd}`,
+    `Content-Type: text/plain; charset="UTF-8"`,
+    `Content-Transfer-Encoding: base64`,
+    ``,
+    bodyB64,
+    ``,
+    `--${bnd}`,
+    `Content-Type: text/html; charset="UTF-8"`,
+    `Content-Transfer-Encoding: base64`,
+    ``,
+    b64(Buffer.from(opts.html!, "utf8")),
+    ``,
+    `--${bnd}--`,
+  ].join(CRLF);
+
+  let mime: string;
+  const head = [
+    `From: ${from}`,
+    `To: ${opts.to}`,
+    `Subject: ${subject}`,
+    `MIME-Version: 1.0`,
+  ];
+
+  if (opts.attachment && opts.html) {
+    const outer = `mix_${rnd()}`, inner = `alt_${rnd()}`;
     mime = [
-      `From: ${from}`,
-      `To: ${opts.to}`,
-      `Subject: ${subject}`,
-      `MIME-Version: 1.0`,
+      ...head,
+      `Content-Type: multipart/mixed; boundary="${outer}"`,
+      ``,
+      `--${outer}`,
+      altPart(inner),
+      ``,
+      `--${outer}`,
+      `Content-Type: ${opts.attachment.contentType}; name="${opts.attachment.filename}"`,
+      `Content-Disposition: attachment; filename="${opts.attachment.filename}"`,
+      `Content-Transfer-Encoding: base64`,
+      ``,
+      b64(opts.attachment.data),
+      ``,
+      `--${outer}--`,
+    ].join(CRLF);
+  } else if (opts.html) {
+    mime = [...head, altPart(`alt_${rnd()}`)].join(CRLF);
+  } else if (opts.attachment) {
+    const bnd = `mix_${rnd()}`;
+    mime = [
+      ...head,
       `Content-Type: multipart/mixed; boundary="${bnd}"`,
       ``,
       `--${bnd}`,
@@ -127,10 +189,7 @@ export async function gmailSend(opts: {
     ].join(CRLF);
   } else {
     mime = [
-      `From: ${from}`,
-      `To: ${opts.to}`,
-      `Subject: ${subject}`,
-      `MIME-Version: 1.0`,
+      ...head,
       `Content-Type: text/plain; charset="UTF-8"`,
       `Content-Transfer-Encoding: base64`,
       ``,

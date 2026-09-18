@@ -113,10 +113,30 @@ console.log("\n--- gate 4: daily cap ---");
   check("cap restored", (await getState<number>("daily_cap_auto", 0)) === before, `${before}`);
 }
 
-console.log("\n--- gate 1: the guard still blocks ---");
+console.log("\n--- gate 1: the guard mechanism ---");
 {
-  const g = await guard();
-  check("currently in dry run, nothing can send", !g.send, g.reason);
+  // Test the MECHANISM, not the ambient state. Asserting "we are in dry run"
+  // began failing the moment the pipeline went live - the test being wrong, not
+  // the system. What must always hold: either brake alone blocks, and both must
+  // be off deliberately before anything sends.
+  const b4 = { enabled: await getState<boolean>("enabled", true),
+               dry: await getState<boolean>("dry_run", true) };
+  const envB4 = process.env.DRY_RUN;
+  try {
+    await setState("enabled", true); await setState("dry_run", true);
+    process.env.DRY_RUN = "false";
+    check("db brake alone blocks sending", !(await guard()).send);
+    await setState("dry_run", false); process.env.DRY_RUN = "true";
+    check("env brake alone blocks sending", !(await guard()).send);
+    await setState("enabled", false); process.env.DRY_RUN = "false";
+    check("kill switch overrides both", !(await guard()).send);
+    await setState("enabled", true); await setState("dry_run", false);
+    process.env.DRY_RUN = "false";
+    check("sends only when both brakes are deliberately off", (await guard()).send);
+  } finally {
+    await setState("enabled", b4.enabled); await setState("dry_run", b4.dry);
+    if (envB4 === undefined) delete process.env.DRY_RUN; else process.env.DRY_RUN = envB4;
+  }
 }
 
 console.log("\n--- contact extraction refuses the wrong addresses ---");

@@ -45,9 +45,11 @@ async function markCard(r: Row, banner: string, extra = "") {
        ...(extra ? [``, esc(extra)] : []),
        ``, `[Open listing](${r.url})`].join("\n"),
     );
-  } catch {
-    // Telegram refuses an edit if the text is byte-identical, and the card may
-    // have aged out. Neither changes what was decided.
+  } catch (e) {
+    // Telegram refuses an edit if the text is byte-identical, and a card older
+    // than 48h cannot be edited at all. Neither changes what was decided — but
+    // log it, because a silent catch here once hid the card never updating.
+    console.warn(`markCard failed: ${String((e as Error).message).slice(0, 120)}`);
   }
 }
 

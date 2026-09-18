@@ -13,6 +13,8 @@ export const IDENTITY = {
   name: "Your Name",
   location: "Your City, Your Country",
   timezone: "UTC+0",
+  email: "you@example.com",
+  phone: "+00 000 000 0000",
   githubUser: "your-github-handle",
   linkedin: "linkedin.com/in/your-handle",
   title: "AI Automation Engineer",

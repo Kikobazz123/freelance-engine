@@ -85,6 +85,10 @@ export async function approvalCard(p: {
     esc(p.preview.slice(0, 550)),
     ``,
     `[Open listing](${p.url})`,
+    // Telegram expects answerCallbackQuery within ~10s, and the scheduled poller
+    // runs every 5 minutes — so the button toast will usually never appear. Say
+    // so on the card rather than letting a press look like it did nothing.
+    `_Tap registers within 5 min \— run_ \`npm run approvals\` _for instant_`,
   ].join("\n");
 
   return send(text, [[
@@ -107,17 +111,30 @@ export type Callback = {
 export type Command = { text: string; chatId: number };
 
 /**
- * Acknowledge a button press.
+ * Acknowledge a button press. NEVER throws.
  *
- * Telegram spins the button until this is called and gives up after ~10s with a
- * visible error, so it runs before any slow work — the user should never see a
- * stuck button because a database write was in flight.
+ * Callback ids expire after a couple of minutes, and the scheduled poller can
+ * pick a press up as much as five minutes late — so this call frequently fails
+ * with "query is too old" through no fault of the decision being made.
+ *
+ * It used to throw. Because it runs first in approve(), that aborted everything
+ * after it: the proposal was marked approved in the database, and then the card
+ * edit and the full-text message never happened. The decision was recorded and
+ * completely invisible, which is the worst of both.
+ *
+ * The toast is cosmetic. The card edit is the real feedback. A failure here must
+ * not take the rest down with it.
  */
 export async function answerCallback(id: string, text?: string, alert = false) {
-  return call("answerCallbackQuery", {
-    callback_query_id: id,
-    ...(text ? { text, show_alert: alert } : {}),
-  });
+  try {
+    return await call("answerCallbackQuery", {
+      callback_query_id: id,
+      ...(text ? { text, show_alert: alert } : {}),
+    });
+  } catch (e) {
+    console.warn(`answerCallback failed (non-fatal): ${String((e as Error).message).slice(0, 90)}`);
+    return null;
+  }
 }
 
 /** Rewrite a card in place once it is decided, so the chat shows current state. */

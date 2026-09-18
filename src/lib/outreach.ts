@@ -53,18 +53,19 @@ with code — that is the pitch. Never say HE builds in them.
 He works remotely from the location in the profile. Never state or imply he is in,
 or moving to, any other place. Offering timezone overlap is fine.
 
-Return ONLY the email body. No subject line, no greeting line with a name you do
-not know, no signature block — those are added separately.
+Return ONLY the body paragraphs. No subject line, NO greeting ("Dear ..."), NO
+sign-off ("Kind regards"), no signature block — all of those are wrapped around
+your text afterwards, and repeating them produces a letter with two signatures.
 `.trim();
 
 const PROFILE = [
-  `${IDENTITY.title}. ${IDENTITY.company}. ${IDENTITY.location} (${IDENTITY.timezone}),
-   remote.`,
+  `${IDENTITY.name} - ${IDENTITY.title}, ${IDENTITY.company}.`,
+  `${IDENTITY.location} (${IDENTITY.timezone}), remote.`,
   ``,
-  `VERIFIABLE WORK ONLY:`,
+  `VERIFIABLE WORK ONLY - never claim anything outside this list:`,
   VERIFIABLE_WORK,
   ``,
-  `HONEST GAPS:`,
+  `HONEST GAPS - never paper over, never claim:`,
   HONEST_GAPS,
 ].join("\n");
 
@@ -114,7 +115,7 @@ export function footerFor(): string {
     `${SENDER_NAME}`,
     `AI Automation Engineer · LordGen`,
     `${SENDER_LOCATION}`,
-    `github.com/${IDENTITY.githubUser} · ${IDENTITY.linkedin}`,
+    `${IDENTITY.githubUser} · ${IDENTITY.linkedin}`,
     ``,
     `Reply "no thanks" and I won't contact you again.`,
   ].join("\n");
@@ -149,7 +150,10 @@ export async function composeApplication(
 
   return {
     subject: subjectFor(t),
-    body: res.text.trim() + "\n" + footerFor(),
+    // Body only. The salutation, sign-off and signature block are added by
+    // src/lib/letter.ts. Appending footerFor() here as well produced a letter
+    // with two signatures, visible in the first preview.
+    body: res.text.trim(),
     provider: res.provider,
   };
 }

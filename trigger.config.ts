@@ -11,6 +11,8 @@ import { defineConfig } from "@trigger.dev/sdk";
 // The env var is still honoured first so CI can override it, but the literal is
 // what actually runs locally.
 //
+// Do NOT point this at proj_sxgdbovpibczzlqwdqxp — that is lordgen-daily-report,
+// and deploying here would overwrite its tasks.
 export default defineConfig({
   project: process.env.TRIGGER_PROJECT_REF ?? "proj_REPLACE_WITH_YOURS",
   dirs: ["./src/trigger"],

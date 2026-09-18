@@ -140,6 +140,21 @@ const CB = "test-callback-id";
   `;
 }
 
+/* 9. an expired callback id must not suppress the card edit or the full text */
+{
+  const id = await reset("Freelancer-ai-agent");
+  // "test-callback-id" is never a valid Telegram callback id, so answerCallback
+  // fails exactly as an expired one does. This used to throw and abort approve()
+  // after the database write, leaving the decision recorded and invisible.
+  let threw = false;
+  try { await approve("definitely-expired-callback-id", id); }
+  catch { threw = true; }
+  const [p] = (await sql`SELECT status FROM proposals WHERE id = ${id}`) as any[];
+  check("approve does not throw when the callback id is expired", !threw);
+  check("decision still recorded despite the expired callback",
+    p?.status === "approved", `status=${p?.status}`);
+}
+
 /* 9. platform mapping */
 check("Upwork source maps to the upwork budget", platformOf("Upwork-ai") === "upwork");
 check("a free board consumes no platform budget", platformOf("WWR-All") === null);

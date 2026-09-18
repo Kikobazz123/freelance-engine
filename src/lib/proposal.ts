@@ -9,18 +9,18 @@
  */
 
 import { completeValidated } from "./llm.js";
-import { IDENTITY, VERIFIABLE_WORK, HONEST_GAPS, RATE_FLOOR_HOURLY } from "../config.js";
+import { IDENTITY, VERIFIABLE_WORK, HONEST_GAPS } from "../config.js";
 import { validateClaims } from "./claims.js";
 import { marketOf, type MarketTier } from "./geo.js";
 
 const PROFILE = [
-  `${IDENTITY.name} — ${IDENTITY.title}, ${IDENTITY.company}.`,
+  `${IDENTITY.name} - ${IDENTITY.title}, ${IDENTITY.company}.`,
   `${IDENTITY.location} (${IDENTITY.timezone}), remote.`,
   ``,
-  `VERIFIABLE WORK ONLY — never claim anything outside this list:`,
+  `VERIFIABLE WORK ONLY - never claim anything outside this list:`,
   VERIFIABLE_WORK,
   ``,
-  `HONEST GAPS — never paper over, never claim:`,
+  `HONEST GAPS - never paper over, never claim:`,
   HONEST_GAPS,
 ].join("\n");
 
@@ -75,7 +75,7 @@ export type ListingRow = {
  * currency markets — a US or Swiss client is not priced like a Tier 2 one, and
  * asking the same of both leaves money on the table.
  */
-export function quoteRate(l: ListingRow, floor = RATE_FLOOR_HOURLY): number {
+export function quoteRate(l: ListingRow, floor = 35): number {
   const tier = l.market_tier ?? marketOf(`${l.title} ${l.url}`).tier;
   const uplift = tier === 1 ? 15 : tier === 2 ? 5 : 0;
   if (l.rate_type === "hourly" && l.rate_min) {

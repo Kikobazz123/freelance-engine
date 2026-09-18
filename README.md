@@ -108,6 +108,21 @@ Three rules keep it honest:
    board with that board's typical market covers a lot of the corpus on an
    assumption, so it earns a smaller weight than a currency symbol.
 
+## The letter
+
+Applications go out as a formatted letter, not a bare paragraph: letterhead,
+date, salutation, body, sign-off, signature, with the CV attached. Sent as
+`multipart/alternative` so clients that do not render HTML get an identical
+plain-text version.
+
+Deliberately not a block business letter — a recipient postal address by email
+reads as a mail merge. And the salutation uses the company, never a first name
+guessed from the mailbox: "Dear Recruiting" from `recruiting@` is a visible
+mistake, and no name beats a wrong one.
+
+`stripFurniture()` removes any subject line, greeting or sign-off the model emits
+anyway. A negative instruction in a prompt is a request, not a guarantee.
+
 ## Stack
 
 TypeScript · Trigger.dev (durable scheduled jobs) · Neon serverless Postgres ·
@@ -140,7 +155,7 @@ scripts/        four verification suites, dry run, credential check
 ## Verification
 
 ```bash
-npm run verify      # 57 assertions across four suites
+npm run verify      # 62 assertions across four suites
 npm run dry-run     # full pipeline, writes every artifact for review, sends nothing
 npm run check       # live credential check against every provider
 ```
@@ -152,6 +167,13 @@ The suites are the point, not decoration. Bugs they caught before production:
 - a "veto" that scored 16 instead of 0
 - a market filter that would have silently disabled the entire marketplace lane,
   because the highest-yield feed carries no location data
+- an env-var upload that reported success while writing to the wrong environment,
+  so every deployed run failed on a missing `DATABASE_URL` while the check said
+  all eleven variables were present
+- a callback acknowledgement that threw on expired ids, aborting the card update
+  *after* the decision had already been committed — recorded and invisible
+- a test that restored the pipeline to "safe" so aggressively it silently
+  disarmed a deliberately live deployment
 
 ## Setup
 

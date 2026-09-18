@@ -17,7 +17,11 @@
     "cv": "python scripts/build_docx.py",
     "approvals": "tsx scripts/approvals.ts",
     "migrate": "tsx scripts/migrate.ts",
-    "dry-run": "tsx scripts/dry-run.ts"
+    "dry-run": "tsx scripts/dry-run.ts",
+    "env:push": "tsx scripts/push-env.ts",
+    "env:push:prod": "tsx scripts/push-env.ts --env prod",
+    "check:deploy": "tsx scripts/check-deploy.ts",
+    "now": "tsx scripts/run-now.ts"
   },
   "dependencies": {
     "@trigger.dev/sdk": "4.4.0",

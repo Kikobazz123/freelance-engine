@@ -31,6 +31,17 @@ const before = {
   dry: await getState<boolean>("dry_run", true),
 };
 
+// Everything from here mutates pipeline_state. process.on("exit") cannot await,
+// so the restore also runs on the unhandled paths below.
+const restore = async () => {
+  await setState("enabled", before.enabled);
+  await setState("dry_run", before.dry);
+};
+process.on("uncaughtException", (e) => {
+  console.error("uncaught:", e);
+  restore().finally(() => process.exit(1));
+});
+
 // 1. dry_run in the DB must block, regardless of env.
 await setState("enabled", true);
 await setState("dry_run", true);
@@ -58,7 +69,15 @@ process.env.DRY_RUN = "false";
 g = await guard();
 check("sending allowed only when db AND env both say live", g.send, g.reason);
 
-// restore
+// Restore what we found.
+//
+// Two failures shaped this. First an interrupted run left dry_run=false with only
+// the env var holding sending back — one brake instead of two. The fix then was to
+// always restore the SAFE value, which overcorrected: running the suite against a
+// deliberately live pipeline silently disarmed it, and the next send did nothing.
+//
+// So: restore the captured value, but in a finally-style guarantee so a crash
+// cannot skip it, and never leave it MORE permissive than it was found.
 await setState("enabled", before.enabled);
 await setState("dry_run", before.dry);
 process.env.DRY_RUN = "true";

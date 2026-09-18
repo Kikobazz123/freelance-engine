@@ -1,9 +1,11 @@
 import { schedules, logger } from "@trigger.dev/sdk";
+import { IDENTITY } from "../config.js";
 import { readFileSync, existsSync } from "node:fs";
 import { sql, guard, getState, sentToday } from "../lib/db.js";
 import { gmailSend } from "../lib/gmail.js";
 import { composeApplication, isStub, type Target } from "../lib/outreach.js";
 import { validateClaims } from "../lib/claims.js";
+import { salutationFor, htmlLetter, textLetter } from "../lib/letter.js";
 import { send as tg, esc } from "../lib/telegram.js";
 
 /**
@@ -26,7 +28,7 @@ import { send as tg, esc } from "../lib/telegram.js";
  *   7. gmailSend(dryRun)  short-circuits before the network regardless
  */
 
-const CV_PATH = "cv/Lordmark-Dorgu-AI-Automation-Engineer.pdf";
+const CV_PATH = "cv/cv.pdf";
 
 export const sendLaneA = schedules.task({
   id: "send-lane-a",
@@ -75,7 +77,7 @@ export const sendLaneA = schedules.task({
 
     const cv = existsSync(CV_PATH)
       ? {
-          filename: "Lordmark-Dorgu-AI-Automation-Engineer.pdf",
+          filename: "cv.pdf",
           contentType: "application/pdf",
           data: readFileSync(CV_PATH),
         }
@@ -125,8 +127,18 @@ export const sendLaneA = schedules.task({
       // Gate 1 + 7. The guard decides; gmailSend enforces it again independently.
       const dry = !g.send;
       try {
+        // Wrap the body in a proper letter: letterhead, date, salutation,
+        // sign-off, signature. HTML for clients that render it, plain text for
+        // those that do not; identical content in both.
+        const sal = salutationFor(r.company, r.contact_email);
         const res = await gmailSend({
-          to: r.contact_email, subject, body, dryRun: dry, attachment: cv,
+          to: r.contact_email,
+          subject,
+          body: textLetter(sal, body),
+          html: htmlLetter(sal, body),
+          fromName: IDENTITY.name,
+          dryRun: dry,
+          attachment: cv,
         });
 
         await sql`
