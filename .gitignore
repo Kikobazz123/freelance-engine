@@ -1,0 +1,22 @@
+node_modules/
+.env
+.env.local
+.trigger/
+dist/
+*.log
+credentials.json
+token.json
+client_secret*.json
+data/*.csv
+data/*.xlsx
+cv/*.pdf
+cv/*.docx
+cv/cv-ats.txt
+
+# Harvested output contains third parties' contact details. Those people
+# published an address to receive applications, not to be republished in a
+# repo — keep the whole data directory local.
+data/
+
+# Your own identity and profile
+src/config.ts

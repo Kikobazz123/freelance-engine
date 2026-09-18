@@ -1,0 +1,33 @@
+{
+  "name": "freelance-engine",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "trigger.dev dev",
+    "deploy": "trigger.dev deploy",
+    "pipeline": "tsx scripts/run-pipeline.ts",
+    "pipeline:csv": "tsx scripts/run-pipeline.ts --csv",
+    "backfill": "tsx scripts/backfill-market.ts",
+    "geo:audit": "tsx scripts/geo-audit.ts",
+    "check": "tsx scripts/check-keys.ts",
+    "verify": "tsx scripts/verify.ts && tsx scripts/verify-extra.ts && tsx scripts/verify-callbacks.ts && tsx scripts/verify-lane-a.ts",
+    "gmail-oauth-setup": "tsx scripts/gmail-oauth-setup.ts",
+    "card:test": "tsx scripts/send-test-card.ts",
+    "cv": "python scripts/build_docx.py",
+    "approvals": "tsx scripts/approvals.ts",
+    "migrate": "tsx scripts/migrate.ts",
+    "dry-run": "tsx scripts/dry-run.ts"
+  },
+  "dependencies": {
+    "@trigger.dev/sdk": "4.4.0",
+    "@neondatabase/serverless": "^0.10.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "dotenv": "^16.4.5",
+    "trigger.dev": "4.4.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
