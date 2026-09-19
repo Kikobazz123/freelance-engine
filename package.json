@@ -5,13 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "trigger.dev dev",
-    "deploy": "trigger.dev deploy",
+    "deploy": "trigger.dev@4.4.0 deploy",
     "pipeline": "tsx scripts/run-pipeline.ts",
     "pipeline:csv": "tsx scripts/run-pipeline.ts --csv",
     "backfill": "tsx scripts/backfill-market.ts",
     "geo:audit": "tsx scripts/geo-audit.ts",
     "check": "tsx scripts/check-keys.ts",
-    "verify": "tsx scripts/verify.ts && tsx scripts/verify-extra.ts && tsx scripts/verify-callbacks.ts && tsx scripts/verify-lane-a.ts",
+    "verify": "tsx scripts/verify-all.ts",
     "gmail-oauth-setup": "tsx scripts/gmail-oauth-setup.ts",
     "card:test": "tsx scripts/send-test-card.ts",
     "cv": "python scripts/build_docx.py",
@@ -21,7 +21,9 @@
     "env:push": "tsx scripts/push-env.ts",
     "env:push:prod": "tsx scripts/push-env.ts --env prod",
     "check:deploy": "tsx scripts/check-deploy.ts",
-    "now": "tsx scripts/run-now.ts"
+    "now": "tsx scripts/run-now.ts",
+    "digest": "tsx scripts/digest.ts",
+    "verify:chain": "tsx scripts/verify.ts && tsx scripts/verify-extra.ts && tsx scripts/verify-callbacks.ts && tsx scripts/verify-lane-a.ts && tsx scripts/verify-digest.ts"
   },
   "dependencies": {
     "@trigger.dev/sdk": "4.4.0",

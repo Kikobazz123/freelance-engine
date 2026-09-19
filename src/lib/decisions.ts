@@ -13,6 +13,8 @@
 
 import { sql, bidBudget, spendBid, platformOf, guard, type Platform } from "./db.js";
 import { answerCallback, editMessage, sendPlain, esc } from "./telegram.js";
+import { sendBatch } from "./drafts.js";
+import { updateCard, approvedButton } from "./digest.js";
 
 const CONNECT_COST = 8; // Upwork proposals cost 4-16; assume the common case.
 
@@ -153,26 +155,151 @@ export async function fullText(cbId: string, proposalId: number): Promise<string
   return "full_text";
 }
 
+/* ------------------------------------------------------- whole-batch actions */
+
+/**
+ * Approve and send an entire Lane A batch on one press.
+ *
+ * Ordering matters more than it looks. The card is rewritten to its decided
+ * state BEFORE the sending starts, because sending a dozen emails takes a
+ * minute or two and a button that sits there unchanged for that long reads as
+ * broken — which is exactly the bug that made a decision "recorded and
+ * completely invisible" once already. So: take the lock, acknowledge, repaint
+ * the card, then do the slow work and repaint again with the result.
+ *
+ * The conditional UPDATE to 'sending' is the lock. A double press, or a
+ * redelivered update, finds the row already moved and does nothing.
+ */
+export async function approveAll(cbId: string, batchId: string): Promise<string> {
+  const rows = (await sql`
+    SELECT status, n_drafts FROM digests WHERE batch_id = ${batchId}
+  `) as { status: string; n_drafts: number }[];
+  if (!rows.length) { await answerCallback(cbId, "Batch not found", true); return "not_found"; }
+  if (rows[0].status !== "pending") {
+    await answerCallback(cbId, `Batch already ${rows[0].status}`, true);
+    return `already_${rows[0].status}`;
+  }
+
+  const won = (await sql`
+    UPDATE digests SET status = 'sending', decided_at = now()
+    WHERE batch_id = ${batchId} AND status = 'pending'
+    RETURNING batch_id
+  `) as { batch_id: string }[];
+  if (!won.length) { await answerCallback(cbId, "Already handled", true); return "race_lost"; }
+
+  const g = await guard();
+  if (!g.send) {
+    await sql`UPDATE digests SET status = 'pending', decided_at = NULL WHERE batch_id = ${batchId}`;
+    await answerCallback(cbId, `Held: ${g.reason}`, true);
+    return "held";
+  }
+
+  const n = rows[0].n_drafts;
+  await answerCallback(cbId, `Approved — sending ${n}`);
+  // Instant, before any email goes out.
+  await updateCard(
+    batchId,
+    `BATCH ${batchId}\n\n✅ APPROVED\n\nSending ${n} application${n === 1 ? "" : "s"} now…`,
+    approvedButton(batchId),
+  );
+
+  await sql`
+    UPDATE outreach_drafts SET status = 'approved', decided_at = now()
+    WHERE batch_id = ${batchId} AND status = 'draft'
+  `;
+
+  let result: { sent: number; failed: number; skipped: number };
+  try {
+    result = await sendBatch(batchId);
+  } catch (e) {
+    await sql`UPDATE digests SET status = 'sent' WHERE batch_id = ${batchId}`;
+    await updateCard(
+      batchId,
+      `BATCH ${batchId}\n\n✅ APPROVED\n\nSending failed: ` +
+      String((e as Error).message).slice(0, 200),
+      approvedButton(batchId),
+    );
+    return "send_error";
+  }
+
+  await sql`UPDATE digests SET status = 'sent' WHERE batch_id = ${batchId}`;
+  await updateCard(
+    batchId,
+    [
+      `BATCH ${batchId}`,
+      ``,
+      `✅ APPROVED — ${result.sent} sent`,
+      ...(result.failed ? [`${result.failed} failed`] : []),
+      ...(result.skipped ? [`${result.skipped} skipped (opted out or already contacted)`] : []),
+      ``,
+      `Each went as a letter with your CV attached.`,
+      `Replies will be flagged here automatically.`,
+    ].join("\n"),
+    approvedButton(batchId),
+  );
+
+  return `sent_${result.sent}`;
+}
+
+/** Discard a whole batch without sending any of it. */
+export async function skipAll(cbId: string, batchId: string): Promise<string> {
+  const won = (await sql`
+    UPDATE digests SET status = 'skipped', decided_at = now()
+    WHERE batch_id = ${batchId} AND status = 'pending'
+    RETURNING batch_id
+  `) as { batch_id: string }[];
+  if (!won.length) { await answerCallback(cbId, "Already handled", true); return "race_lost"; }
+
+  const n = (await sql`
+    UPDATE outreach_drafts SET status = 'skipped', decided_at = now()
+    WHERE batch_id = ${batchId} AND status = 'draft'
+    RETURNING id
+  `) as { id: number }[];
+
+  await answerCallback(cbId, `Skipped ${n.length}`);
+  await updateCard(
+    batchId,
+    `BATCH ${batchId}\n\n⏭ SKIPPED — ${n.length} draft${n.length === 1 ? "" : "s"} discarded.\n` +
+    `Nothing was sent. Those listings stay in the pool for a later batch.`,
+    [[{ text: "⏭ Skipped", callback_data: `noop:${batchId}` }]],
+  );
+  return `skipped_${n.length}`;
+}
+
 export async function handleCallback(
   cb: { id: string; data: string },
 ): Promise<{ action: string; result: string }> {
-  const [verb, rawId] = cb.data.split(":");
-  const id = Number(rawId);
+  // Batch verbs carry a batch id, not a numeric proposal id.
+  const [v0, ...restParts] = cb.data.split(":");
+  const rest = restParts.join(":");
+  if (v0 === "all")  return { action: "approve_all", result: await approveAll(cb.id, rest) };
+  if (v0 === "nall") return { action: "skip_all",    result: await skipAll(cb.id, rest) };
+  if (v0 === "noop") {
+    // The single button a decided card is left with. Confirms, changes nothing.
+    const rows = (await sql`
+      SELECT status FROM digests WHERE batch_id = ${rest}
+    `) as { status: string }[];
+    await answerCallback(cb.id, `Batch ${rows[0]?.status ?? "decided"} — nothing left to do`, true);
+    return { action: "noop", result: rows[0]?.status ?? "unknown" };
+  }
+
+  // Everything else is a single-proposal verb carrying a numeric id.
+  const id = Number(rest);
   if (!Number.isFinite(id)) {
     await answerCallback(cb.id, "Malformed button");
-    return { action: verb, result: "bad_id" };
+    return { action: v0, result: "bad_id" };
   }
   // proposalId 0 is the test card from scripts/send-test-card.ts.
   if (id === 0) {
     await answerCallback(cb.id, "Test card — not a real proposal", true);
-    return { action: verb, result: "test_card" };
+    return { action: v0, result: "test_card" };
   }
-  switch (verb) {
+  switch (v0) {
     case "ap": return { action: "approve", result: await approve(cb.id, id) };
     case "sk": return { action: "skip", result: await skip(cb.id, id) };
     case "ed": return { action: "full_text", result: await fullText(cb.id, id) };
     default:
       await answerCallback(cb.id, "Unknown action");
-      return { action: verb, result: "unknown" };
+      return { action: v0, result: "unknown" };
   }
 }

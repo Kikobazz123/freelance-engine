@@ -45,12 +45,42 @@ export async function send(text: string, buttons?: Button[][]) {
   })) as { message_id: number; chat: { id: number } };
 }
 
-/** Plain text escape hatch — for payloads that may contain unescapable junk. */
-export async function sendPlain(text: string) {
+/**
+ * Plain text escape hatch — for payloads that may contain unescapable junk.
+ *
+ * Takes optional buttons. The digest carries dozens of listing URLs, and every
+ * one of them is a MarkdownV2 minefield (`-`, `.`, `(`, `_` all need escaping,
+ * and one miss 400s the whole message). Telegram auto-links bare URLs in plain
+ * text, so plain text gets clickable links with no escaping at all.
+ */
+export async function sendPlain(text: string, buttons?: Button[][]) {
   const { chatId } = creds();
   return (await call("sendMessage", {
-    chat_id: chatId, text, disable_web_page_preview: true,
+    chat_id: chatId,
+    text,
+    disable_web_page_preview: true,
+    ...(buttons ? { reply_markup: { inline_keyboard: buttons } } : {}),
   })) as { message_id: number; chat: { id: number } };
+}
+
+/**
+ * Edit a plain-text message, replacing its keyboard.
+ *
+ * Passing `buttons` as `[]` strips the keyboard entirely; passing a single
+ * button replaces the row with just that one. Same no-escaping rationale as
+ * sendPlain — a card that cannot be edited because of a stray full stop is a
+ * card that lies about its own state.
+ */
+export async function editPlain(
+  chatId: number, messageId: number, text: string, buttons: Button[][] = [],
+) {
+  return call("editMessageText", {
+    chat_id: chatId,
+    message_id: messageId,
+    text,
+    disable_web_page_preview: true,
+    reply_markup: { inline_keyboard: buttons },
+  });
 }
 
 /**

@@ -39,6 +39,26 @@ async function restoreBudgets() {
   }
 }
 
+/**
+ * Give the approve tests budget to spend.
+ *
+ * Snapshotting the real spend is not enough on its own. These tests assert that
+ * approving DOES spend a bid, which is unobservable once the month's real
+ * allowance is gone — and it does go: the free tier is six Freelancer bids, and
+ * six genuine approvals in September exhausted it. The suite then reported six
+ * failures while the code was behaving perfectly.
+ *
+ * A test must arrange the state it asserts on rather than borrow whatever the
+ * production data happens to be. restoreBudgets() puts the truth back.
+ */
+async function arrangeHeadroom() {
+  await sql`
+    UPDATE bid_budget SET spent = 0
+    WHERE period = date_trunc('month', now())::date
+  `;
+}
+await arrangeHeadroom();
+
 async function reset(source: string): Promise<number> {
   await sql`DELETE FROM listings WHERE id = ${LID}`; // cascades to proposals/sends
   await sql`

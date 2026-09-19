@@ -48,6 +48,60 @@ const STATEMENTS: [string, string][] = [
   ["pipeline_state seed: telegram offset",
     `INSERT INTO pipeline_state (key, value) VALUES ('telegram_offset', '0'::jsonb)
        ON CONFLICT (key) DO NOTHING`],
+
+  /*
+   * Lane A used to compose an email and send it in the same breath, which meant
+   * there was no moment at which a human could read one. These two tables put a
+   * reviewable draft in between: compose and validate up front, show the batch,
+   * then send only what was approved.
+   */
+  ["outreach_drafts table",
+    `CREATE TABLE IF NOT EXISTS outreach_drafts (
+       id              BIGSERIAL PRIMARY KEY,
+       batch_id        TEXT NOT NULL,
+       listing_id      TEXT NOT NULL,
+       to_address      TEXT NOT NULL,
+       subject         TEXT NOT NULL,
+       salutation      TEXT NOT NULL,
+       body            TEXT NOT NULL,
+       status          TEXT NOT NULL DEFAULT 'draft',
+       blocked_reason  TEXT,
+       provider        TEXT,
+       provider_msg_id TEXT,
+       gmail_thread_id TEXT,
+       created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+       decided_at      TIMESTAMPTZ,
+       sent_at         TIMESTAMPTZ
+     )`],
+  ["outreach_drafts status check",
+    `ALTER TABLE outreach_drafts DROP CONSTRAINT IF EXISTS outreach_drafts_status_check`],
+  ["outreach_drafts status values",
+    `ALTER TABLE outreach_drafts ADD CONSTRAINT outreach_drafts_status_check
+       CHECK (status IN ('draft','blocked','approved','sent','failed','skipped'))`],
+  ["outreach_drafts batch index",
+    `CREATE INDEX IF NOT EXISTS outreach_drafts_batch_idx ON outreach_drafts (batch_id)`],
+  // One draft per address per batch. Staging twice must not queue the same
+  // person twice; the send-side unique index on sends is the last line, not the
+  // only one.
+  ["outreach_drafts one per address per batch",
+    `CREATE UNIQUE INDEX IF NOT EXISTS outreach_drafts_batch_addr
+       ON outreach_drafts (batch_id, to_address)`],
+
+  ["digests table",
+    `CREATE TABLE IF NOT EXISTS digests (
+       batch_id            TEXT PRIMARY KEY,
+       telegram_chat_id    BIGINT,
+       telegram_message_id BIGINT,
+       status              TEXT NOT NULL DEFAULT 'pending',
+       n_drafts            INTEGER NOT NULL DEFAULT 0,
+       created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+       decided_at          TIMESTAMPTZ
+     )`],
+  ["digests status check",
+    `ALTER TABLE digests DROP CONSTRAINT IF EXISTS digests_status_check`],
+  ["digests status values",
+    `ALTER TABLE digests ADD CONSTRAINT digests_status_check
+       CHECK (status IN ('pending','sending','sent','skipped'))`],
 ];
 
 for (const [name, stmt] of STATEMENTS) {
