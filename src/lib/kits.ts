@@ -47,7 +47,7 @@ export async function kitCandidates(limit: number) {
       AND l.last_seen_at > now() - interval '30 days'
       AND l.url ~ '^https?://'
       AND NOT EXISTS (SELECT 1 FROM apply_kits k WHERE k.listing_id = l.id)
-    ORDER BY l.fit_score DESC, coalesce(l.posted_at, l.first_seen_at) DESC
+    ORDER BY l.rank_score DESC NULLS LAST, coalesce(l.posted_at, l.first_seen_at) DESC
     LIMIT ${limit}
   `) as any[];
 }

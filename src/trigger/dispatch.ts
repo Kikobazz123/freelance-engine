@@ -45,7 +45,7 @@ export const dispatch = schedules.task({
       FROM proposals p
       JOIN listings l ON l.id = p.listing_id
       WHERE p.status = 'draft'
-      ORDER BY l.fit_score DESC
+      ORDER BY l.rank_score DESC NULLS LAST, l.fit_score DESC
     `) as any[];
 
     let queued = 0, sent = 0, held = 0, budgetBlocked = 0, belowBar = 0;

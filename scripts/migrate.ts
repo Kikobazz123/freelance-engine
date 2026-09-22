@@ -128,6 +128,12 @@ const STATEMENTS: [string, string][] = [
   // so re-scoring can re-apply eligibility after a listing leaves the feeds.
   ["listings.location",
     `ALTER TABLE listings ADD COLUMN IF NOT EXISTS location TEXT`],
+  // The unclamped score, for ORDERING. fit_score stays 0-100 as the bar; twelve
+  // listings tied at exactly 100, so the order among the best was arbitrary.
+  ["listings.rank_score",
+    `ALTER TABLE listings ADD COLUMN IF NOT EXISTS rank_score INTEGER`],
+  ["listings rank index",
+    `CREATE INDEX IF NOT EXISTS listings_rank_idx ON listings (rank_score DESC) WHERE fit_score >= 65`],
   /*
    * Apply kits — eligible, high-fit jobs whose employer takes applications
    * through a form, not an email. 193 of 213 eligible matches in one 30-day

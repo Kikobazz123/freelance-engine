@@ -313,7 +313,17 @@ export const SOURCES: Source[] = [
       const c = JSON.parse(await get(
         `https://hn.algolia.com/api/v1/search?tags=comment,story_${story.objectID}&hitsPerPage=600`
       ));
-      return (c.hits ?? []).filter((h: any) => h.comment_text).map((h: any) => {
+      /*
+       * Top-level comments only. A reply is someone answering a posting —
+       * usually a candidate ("Interested in the Full Stack AI Engineer role. I
+       * build agents...") — not an employer. Replies were harvested for weeks:
+       * 55 of 306 HN listings, one of them ranked 90. None carried an address,
+       * but one that did would have been emailed as if it were a hiring
+       * manager. 141 of 400 comments in the September thread are replies.
+       */
+      return (c.hits ?? [])
+        .filter((h: any) => h.comment_text && String(h.parent_id) === String(story.objectID))
+        .map((h: any) => {
         const txt = strip(h.comment_text);
         return {
           title: txt.slice(0, 130),
@@ -361,6 +371,42 @@ export const SOURCES: Source[] = [
         "application/atom+xml, application/xml, text/xml"))
         .filter((i) => /^\s*\[hiring\]/i.test(i.title))
         .map((i) => ({ ...i, title: i.title.replace(/^\s*\[hiring\]\s*/i, ""), rate_hint: i.description })) },
+
+  /*
+   * Remotiko: a board built for applicants in Africa and other under-served
+   * regions, pulling straight from company ATS systems (1,144 jobs on
+   * 2026-09-22). It has no advertised feed, but runs WordPress Job Manager,
+   * whose standard REST endpoint is public and robots.txt allows it. Applies are
+   * ATS links, not emails — these feed the apply-kit lane. Newest 300 per run.
+   * The structured _job_location goes through eligibility like every other feed:
+   * it includes Philippines-only and US-only roles alongside worldwide ones.
+   */
+  { name: "Remotiko", tier: "C", lane: "auto", type: "custom",
+    fetch: async () => {
+      const out: Raw[] = [];
+      for (let page = 1; page <= 3; page++) {
+        let items: any[];
+        try {
+          items = JSON.parse(await get(
+            `https://remotiko.com/wp-json/wp/v2/job-listings?per_page=100&page=${page}`));
+        } catch { break; }
+        if (!Array.isArray(items) || !items.length) break;
+        for (const j of items) {
+          if (j.meta?._filled === "1" || j.meta?._filled === 1) continue;
+          const loc = j.meta?._job_location;
+          out.push({
+            title: strip(j.title?.rendered ?? ""),
+            company: j.meta?._company_name ?? "",
+            url: j.meta?._application && /^https?:/.test(j.meta._application) ? j.meta._application : j.link,
+            description: strip(j.content?.rendered ?? "").slice(0, DESC_CAP),
+            posted_at: j.date_gmt ? `${j.date_gmt}Z` : j.date,
+            rate_hint: j.meta?._job_salary ? `${j.meta._job_salary} ${j.meta._job_salary_unit ?? ""}` : "",
+            location: typeof loc === "string" && loc !== "Array" ? loc : "",
+          });
+        }
+      }
+      return out;
+    } },
 
   // --- RSS (all verified live) ---
   // Removed 2026-09-22: Larajobs (PHP only), Golangprojects (Go only) and

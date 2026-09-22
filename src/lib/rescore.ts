@@ -12,6 +12,7 @@
 import { sql } from "./db.js";
 import { score } from "./scoring.js";
 import { flagsFor, withEligibility } from "./sources.js";
+import { eligibility } from "./eligibility.js";
 
 export async function rescoreListings(opts: {
   sinceDays: number; includeUnscored?: boolean; floor?: number;
@@ -20,14 +21,15 @@ export async function rescoreListings(opts: {
 
   const rows = (await sql`
     SELECT id, title, tier, stack_tags, red_flags, rate_min, rate_type, posted_at,
-           market_tier, market_confidence, fit_score, source, description, location
+           market_tier, market_confidence, fit_score, source, description, location,
+           rank_score
     FROM listings
     WHERE (${includeUnscored} AND fit_score IS NULL)
        OR last_seen_at > now() - (${sinceDays} || ' days')::interval
   `) as any[];
 
   let scored = 0, vetoed = 0, changed = 0;
-  const updates: { id: string; sc: number; why: string; flags: string[] }[] = [];
+  const updates: { id: string; sc: number; why: string; flags: string[]; raw: number }[] = [];
   for (const r of rows) {
     /*
      * Re-derive flags with today's rules, as a UNION with what is stored.
@@ -46,7 +48,7 @@ export async function rescoreListings(opts: {
     const flags = [...new Set([...stored, ...derived])];
     const flagsMoved = flags.length !== stored.length;
 
-    const { score: sc, why } = score({
+    const { score: sc, why, raw } = score({
       title: r.title,
       tier: r.tier,
       stack_tags: (r.stack_tags ?? []).join("|"),
@@ -56,14 +58,16 @@ export async function rescoreListings(opts: {
       posted_at: r.posted_at ? new Date(r.posted_at).toISOString() : null,
       market_tier: r.market_tier ?? null,
       market_confidence: r.market_confidence ?? null,
+      eligibility: eligibility(r.location),
+      source: r.source ?? null,
     }, floor);
 
     scored++;
     if (sc === 0) vetoed++;
     // Only write what moved. Most rows re-score to the same number.
-    if (sc !== r.fit_score || flagsMoved) {
+    if (sc !== r.fit_score || flagsMoved || raw !== r.rank_score) {
       if (sc !== r.fit_score) changed++;
-      updates.push({ id: r.id, sc, why, flags });
+      updates.push({ id: r.id, sc, why, flags, raw });
     }
   }
 
@@ -76,13 +80,13 @@ export async function rescoreListings(opts: {
     const slice = updates.slice(i, i + 200);
     const params: unknown[] = [];
     const tuples = slice.map((u) => {
-      params.push(u.id, u.sc, u.why, u.flags);
-      const b = params.length - 4;
-      return `($${b + 1}::text, $${b + 2}::int, $${b + 3}::text, $${b + 4}::text[])`;
+      params.push(u.id, u.sc, u.why, u.flags, u.raw);
+      const b = params.length - 5;
+      return `($${b + 1}::text, $${b + 2}::int, $${b + 3}::text, $${b + 4}::text[], $${b + 5}::int)`;
     });
     await sql(
-      `UPDATE listings AS l SET fit_score = v.s, score_why = v.w, red_flags = v.f
-       FROM (VALUES ${tuples.join(",")}) AS v(id, s, w, f)
+      `UPDATE listings AS l SET fit_score = v.s, score_why = v.w, red_flags = v.f, rank_score = v.r
+       FROM (VALUES ${tuples.join(",")}) AS v(id, s, w, f, r)
        WHERE l.id = v.id`,
       params,
     );

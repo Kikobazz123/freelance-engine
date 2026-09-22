@@ -33,7 +33,7 @@ async function candidates(limit: number) {
       AND coalesce(market_tier, 0) <> 3
       AND NOT ('abuse' = ANY(red_flags)) AND NOT ('unpaid' = ANY(red_flags))
       AND last_seen_at > now() - interval '30 days'
-    ORDER BY fit_score DESC, last_seen_at DESC
+    ORDER BY rank_score DESC NULLS LAST, last_seen_at DESC
     LIMIT ${limit}
   `) as { id: string; url: string; source: string; fit_score: number; company: string | null }[];
 }

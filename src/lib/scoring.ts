@@ -16,7 +16,31 @@ export type Scorable = {
   posted_at: string | null;
   market_tier?: 0 | 1 | 2 | 3 | null;
   market_confidence?: "high" | "low" | null;
+  /** From eligibility.ts: "open" means the feed says he may apply. */
+  eligibility?: string | null;
+  /** Harvest source name. Decides whether the title is a real job title. */
+  source?: string | null;
 };
+
+/**
+ * On a structured job board the title IS a job title, so it must name something
+ * technical. "BetterHelp: Licensed Clinical Marriage and Family Therapist"
+ * ranked 88 on the stack words in BetterHelp's company blurb; the denylist in
+ * roleMismatch() had no entry for therapist, and never will for every job.
+ * Requiring a positive signal cannot be outrun that way.
+ *
+ * Free-text sources are exempt: an HN or Reddit "title" is the opening of a
+ * post, and a marketplace title is a client's one-line brief ("Automate Harvest
+ * invoice creation"), so a missing role noun there means nothing.
+ */
+const FREE_TEXT_SOURCE = /^(HN-|Reddit-|Freelancer-|Codeur|Gun\.io)/;
+const TECHNICAL_TITLE =
+  /\b(engineer\w*|developer\w*|programmer|swe|software|full[- ]?stack|back[- ]?end|front[- ]?end|devops|sre|architect|cto|machine learning|ml|ai|llm|automat\w*|data|integrations?|python|typescript|javascript|node|react|api|technical|tech|coder|web|platform|cloud|infrastructure|scrap\w*|chatbot|agents?|workflow|n8n|zapier)\b/i;
+
+export function notTechnical(title: string, source?: string | null): boolean {
+  if (source && FREE_TEXT_SOURCE.test(source)) return false;
+  return !TECHNICAL_TITLE.test(title);
+}
 
 /**
  * Client market weighting.
@@ -61,7 +85,46 @@ const SENIORITY_PENALTY: [RegExp, number][] = [
   [/\b(10|12|15)\+?\s*years\b/i, -15],
   [/\b(8|9)\+?\s*years\b/i, -8],
   [/\bintern(ship)?\b/i, -12],
+  // He has 1-3 years. These are ranking nudges, not vetoes: a Senior role
+  // that fits the stack is still worth sending, just after the ones he fits.
+  [/\blead\b/i, -10],
+  [/\bsenior\b|\bsr\.?\s/i, -6],
 ];
+
+/*
+ * Title fit — the job title as the main signal.
+ *
+ * Stack tags are read from the whole posting, company blurb included, so nearly
+ * every listing at an AI company maxed the +45 stack bonus. Twelve jobs tied at
+ * exactly 100: "AI agent engineer" alongside "Data & Insights Technical
+ * Consultant", "Automation & AI Adoption Teaching Expert" and "Developer
+ * Advocate". The title says what the job IS; the description says what the
+ * company does. Title fit is now worth more than the description stack.
+ */
+const CORE_ROLE_TITLE = new RegExp(
+  "\\b(ai|ml|llm|genai|agentic|agents?|automation|integrations?|workflow|chatbot)\\b[^|,;()]{0,30}" +
+  "\\b(engineer|developer|specialist|builder|architect)\\b" +
+  "|\\b(forward[- ]deployed|solutions engineer|automation engineer|integrations? engineer|" +
+  "ai engineer|llm engineer|agents? engineer)\\b", "i");
+const STACK_ROLE_TITLE = /\b(python|typescript|javascript|node(\.js)?|full[- ]?stack|back[- ]?end|api|platform)\b/i;
+const GENERIC_ROLE_TITLE = /\b(engineer|developer|programmer|swe)\b/i;
+const ADJACENT_TITLE =
+  /\b(consultant|advocate|evangelist|teach\w*|trainer|instructor|analyst|qa|quality assurance|testing|tester|sdet|application security|security engineer|product manager|manager|writer|researcher|scientist|adoption)\b/i;
+const CONTRACT_TITLE = /\b(contract(or)?|freelancer?|part[- ]time|hourly)\b/i;
+const TITLE_STACK = /\b(python|typescript|javascript|node(\.js)?|react|next\.?js|fastapi|postgres|llm|openai|claude|agents?|automation|api)\b/gi;
+
+/** Points for what the title says the job is. Exported for tests. */
+export function titleFit(title: string): { points: number; why: string[] } {
+  const why: string[] = [];
+  let p = 0;
+  if (CORE_ROLE_TITLE.test(title)) { p += 18; why.push("core-role+18"); }
+  else if (STACK_ROLE_TITLE.test(title)) { p += 10; why.push("stack-role+10"); }
+  else if (GENERIC_ROLE_TITLE.test(title)) { p += 4; why.push("engineer+4"); }
+  if (ADJACENT_TITLE.test(title)) { p -= 15; why.push("adjacent-role-15"); }
+  const named = new Set((title.match(TITLE_STACK) ?? []).map((t) => t.toLowerCase()));
+  if (named.size) { const b = Math.min(named.size * 3, 9); p += b; why.push(`title-stack+${b}`); }
+  return { points: p, why };
+}
 
 /**
  * Hard vetoes — an early return, never a large negative number.
@@ -77,7 +140,11 @@ const SENIORITY_PENALTY: [RegExp, number][] = [
  * require US residency or work authorisation, which a Nigeria-based applicant
  * cannot meet, so every such letter was a guaranteed no.
  */
-const HARD_VETO_FLAGS = ["abuse", "unpaid", "equity_only", "clearance", "onsite_only", "us_only", "region_locked"] as const;
+// not_a_posting: a harvested item that is not a job at all (an HN reply).
+const HARD_VETO_FLAGS = [
+  "abuse", "unpaid", "equity_only", "clearance", "onsite_only", "us_only", "region_locked",
+  "not_a_posting",
+] as const;
 
 /**
  * The job is not an engineering job.
@@ -147,29 +214,45 @@ function daysOld(s: string | null): number {
   return Number.isNaN(t) ? 99 : Math.max(0, (Date.now() - t) / 86_400_000);
 }
 
-export function score(row: Scorable, rateFloor = 35): { score: number; why: string } {
+/**
+ * `score` is the 0-100 fit used as the bar (>= 65 qualifies). `raw` is the same
+ * sum before clamping, stored as rank_score and used for ORDERING — so two jobs
+ * that both clear 100 are still ranked against each other instead of tying.
+ */
+export function score(row: Scorable, rateFloor = 35): { score: number; why: string; raw: number } {
   // --- vetoes first, before any points can be earned ---
   const flags = (row.red_flags || "").split("|").filter(Boolean);
   for (const f of HARD_VETO_FLAGS) {
-    if (flags.includes(f)) return { score: 0, why: `VETO:${f}` };
+    if (flags.includes(f)) return { score: 0, why: `VETO:${f}`, raw: 0 };
   }
-  if (row.market_tier === 3) return { score: 0, why: "VETO:market-tier3" };
-  if (roleMismatch(row.title)) return { score: 0, why: "VETO:not-engineering" };
-  if (foreignLanguage(row.title)) return { score: 0, why: "VETO:foreign-language" };
+  if (row.market_tier === 3) return { score: 0, why: "VETO:market-tier3", raw: 0 };
+  if (roleMismatch(row.title)) return { score: 0, why: "VETO:not-engineering", raw: 0 };
+  if (notTechnical(row.title, row.source)) return { score: 0, why: "VETO:not-technical", raw: 0 };
+  if (foreignLanguage(row.title)) return { score: 0, why: "VETO:foreign-language", raw: 0 };
 
   const why: string[] = [];
   let s = 30;
 
   const tags = (row.stack_tags || "").split("|").filter(Boolean);
-  // Capped so a keyword-stuffed posting cannot dominate on breadth alone.
-  const stack = Math.min(tags.reduce((a, t) => a + (STACK_WEIGHTS[t] ?? 0), 0), 45);
+  // Half weight: these come from the whole posting, company blurb included, and
+  // at full weight they swamped every other signal. See titleFit().
+  const stack = Math.round(Math.min(tags.reduce((a, t) => a + (STACK_WEIGHTS[t] ?? 0), 0), 45) / 2);
   if (stack) { s += stack; why.push(`stack+${stack}(${tags.slice(0, 4).join(",")})`); }
+
+  const tf = titleFit(row.title);
+  s += tf.points; why.push(...tf.why);
 
   const tb = TIER_BONUS[row.tier] ?? 0;
   if (tb) { s += tb; why.push(`tier${row.tier}+${tb}`); }
 
   const blob = `${row.title} ${row.stack_tags}`;
-  if (RESCUE_SIGNALS.some((re) => re.test(blob))) { s += 15; why.push("rescue+15"); }
+  if (RESCUE_SIGNALS.some((re) => re.test(blob))) { s += 12; why.push("rescue+12"); }
+
+  // His goal is freelance/contract work at $20/hr+, so say-so beats inference.
+  if (CONTRACT_TITLE.test(row.title) || row.rate_type === "hourly") { s += 8; why.push("contract+8"); }
+
+  // The feed says outright that he may apply — better odds than silence.
+  if (row.eligibility === "open") { s += 8; why.push("open-to-you+8"); }
 
   const rmin = Number(row.rate_min) || 0;
   if (row.rate_type === "hourly" && rmin) {
@@ -205,5 +288,5 @@ export function score(row: Scorable, rateFloor = 35): { score: number; why: stri
     if (p) { s += p; why.push(`${f}${p}`); }
   }
 
-  return { score: Math.max(0, Math.min(100, Math.round(s))), why: why.join(" ") };
+  return { score: Math.max(0, Math.min(100, Math.round(s))), why: why.join(" "), raw: Math.round(s) };
 }

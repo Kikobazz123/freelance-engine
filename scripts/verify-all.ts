@@ -32,6 +32,7 @@ const SUITES = [
   "verify-discover",
   "verify-eligibility",
   "verify-kits",
+  "verify-ranking",
 ];
 
 type Result = {

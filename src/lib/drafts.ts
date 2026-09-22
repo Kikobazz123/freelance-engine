@@ -75,7 +75,7 @@ async function candidates(limit: number) {
       AND NOT EXISTS (
         SELECT 1 FROM outreach_drafts d
         WHERE d.to_address = l.contact_email AND d.status IN ('draft', 'approved'))
-    ORDER BY l.fit_score DESC
+    ORDER BY l.rank_score DESC NULLS LAST, l.fit_score DESC
     LIMIT ${limit}
   `) as any[];
 }
@@ -158,7 +158,7 @@ export async function loadBatch(batchId: string): Promise<Draft[]> {
     FROM outreach_drafts d
     JOIN listings l ON l.id = d.listing_id
     WHERE d.batch_id = ${batchId}
-    ORDER BY (d.status = 'blocked'), l.fit_score DESC
+    ORDER BY (d.status = 'blocked'), l.rank_score DESC NULLS LAST, l.fit_score DESC
   `) as Draft[];
 }
 
@@ -193,7 +193,7 @@ export async function sendBatch(
     FROM outreach_drafts d
     JOIN listings l ON l.id = d.listing_id
     WHERE d.batch_id = ${batchId} AND d.status = 'approved'
-    ORDER BY l.fit_score DESC
+    ORDER BY l.rank_score DESC NULLS LAST, l.fit_score DESC
   `) as any[];
 
   const cv = {

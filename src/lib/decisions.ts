@@ -432,7 +432,14 @@ export async function handleCallback(
     case "sk": return { action: "skip", result: await skip(cb.id, id) };
     case "ed": return { action: "full_text", result: await fullText(cb.id, id) };
     default:
-      await answerCallback(cb.id, "Unknown action");
+      /*
+       * "Unknown action" told him the button was broken, when the real cause was
+       * a watcher running code older than the card. Nothing was recorded either
+       * way, so say so, and say what to do.
+       */
+      console.warn(`unrecognised callback: ${cb.data}`);
+      await answerCallback(
+        cb.id, "Not recorded — the engine was mid-update. Please tap again in a minute.", true);
       return { action: v0, result: "unknown" };
   }
 }

@@ -15,6 +15,7 @@ import "dotenv/config";
 import { writeFileSync, mkdirSync } from "node:fs";
 import { harvestAll } from "../src/lib/sources.js";
 import { score } from "../src/lib/scoring.js";
+import { eligibility } from "../src/lib/eligibility.js";
 
 const wantCsv = process.argv.includes("--csv");
 const useDb = !process.argv.includes("--no-db");
@@ -35,6 +36,8 @@ const scored = rows.map((r) => {
     rate_min: r.rate_min, rate_type: r.rate_type,
     posted_at: r.posted_at || null,
     market_tier: r.market_tier, market_confidence: r.market_confidence,
+    eligibility: eligibility(r.location),
+    source: r.source,
   });
   return { ...r, fit_score: sc, score_why: why };
 });
@@ -55,6 +58,10 @@ if (useDb) {
   const { inserted, total } = await upsertListings(scored, { scoreToo: true });
   console.log(`
 db: +${inserted} new, ${total} total rows in listings`);
+  // The upsert writes fit_score only; rank_score (the ordering key) is written by
+  // the one shared rescorer, so this path and the scheduled one agree.
+  const { rescoreListings } = await import("../src/lib/rescore.js");
+  await rescoreListings({ sinceDays: 1 });
 }
 
 // --- optional CSV
