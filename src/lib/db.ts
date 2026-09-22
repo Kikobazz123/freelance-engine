@@ -109,6 +109,8 @@ export type ListingUpsert = {
   market?: string; market_tier?: number; market_confidence?: string;
   market_signal?: string;
   contact_email?: string; contact_source?: string;
+  description?: string;
+  location?: string;
 };
 
 /**
@@ -149,12 +151,14 @@ export async function upsertListings(
         r.market ?? null, r.market_tier ?? null,
         r.market_confidence ?? null, r.market_signal ?? null,
         r.contact_email || null, r.contact_source || null,
+        r.description || null,
+        r.location || null,
       );
       const p = (n: number) => `$${base + n}`;
       return `(${p(1)},${p(2)},${p(3)},${p(4)},${p(5)},${p(6)},${p(7)},` +
              `${p(8)}::int,${p(9)}::int,${p(10)},${p(11)}::timestamptz,` +
              `${p(12)}::text[],${p(13)}::text[],${p(14)}::int,${p(15)},` +
-             `${p(16)},${p(17)}::smallint,${p(18)},${p(19)},${p(20)},${p(21)})`;
+             `${p(16)},${p(17)}::smallint,${p(18)},${p(19)},${p(20)},${p(21)},${p(22)},${p(23)})`;
     });
 
     const setScore = scoreToo
@@ -166,14 +170,17 @@ export async function upsertListings(
          id, source, tier, lane, title, company, url,
          rate_min, rate_max, rate_type, posted_at, stack_tags, red_flags,
          fit_score, score_why, market, market_tier, market_confidence, market_signal,
-         contact_email, contact_source
+         contact_email, contact_source, description, location
        ) VALUES ${tuples.join(",")}
        ON CONFLICT (id) DO UPDATE SET last_seen_at = now(),
+         stack_tags = EXCLUDED.stack_tags, red_flags = EXCLUDED.red_flags,
          market = EXCLUDED.market, market_tier = EXCLUDED.market_tier,
          market_confidence = EXCLUDED.market_confidence,
          market_signal = EXCLUDED.market_signal,
          contact_email = coalesce(EXCLUDED.contact_email, listings.contact_email),
-         contact_source = coalesce(EXCLUDED.contact_source, listings.contact_source)${setScore}
+         contact_source = coalesce(EXCLUDED.contact_source, listings.contact_source),
+         description = coalesce(EXCLUDED.description, listings.description),
+         location = coalesce(EXCLUDED.location, listings.location)${setScore}
        RETURNING (xmax = 0) AS is_new`,
       params,
     )) as unknown as { is_new: boolean }[];

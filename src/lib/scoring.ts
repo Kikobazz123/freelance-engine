@@ -71,11 +71,59 @@ const SENIORITY_PENALTY: [RegExp, number][] = [
  * because of the final clamp. Raise any weight and fraud starts scoring above the
  * skip line. A veto has to be a branch, not arithmetic.
  */
-const HARD_VETO_FLAGS = ["abuse", "unpaid", "equity_only", "clearance"] as const;
+/*
+ * us_only joined the vetoes on 2026-09-22, at the user's decision. It was a -35
+ * penalty, which still let "100% remote; US-only" roles through at 86: those
+ * require US residency or work authorisation, which a Nigeria-based applicant
+ * cannot meet, so every such letter was a guaranteed no.
+ */
+const HARD_VETO_FLAGS = ["abuse", "unpaid", "equity_only", "clearance", "onsite_only", "us_only", "region_locked"] as const;
+
+/**
+ * The job is not an engineering job.
+ *
+ * Stack tags come from the whole description, so a Product Designer role at an
+ * AI company collects "agents", "claude" and "typescript" from the company
+ * blurb and scores 76. "Tines: Deal Desk Analyst" reached 100. Harmless while
+ * almost none of these had an email; once discovery finds addresses, each one
+ * becomes a letter to a hiring manager for a job he cannot do.
+ *
+ * Vetoed only when the title names a non-engineering role AND no engineering
+ * one, because HN posts list several roles in one title ("2 Full Stack AI
+ * Engineers, 1 GTM") and those must survive.
+ */
+const NON_ENGINEERING_ROLE =
+  /\b(designer|customer success|account (executive|manager)|sales|deal desk|recruit(er|ing)|talent acquisition|marketing (manager|lead|specialist)|content (writer|marketer)|copywriter|accountant|bookkeep\w*|paralegal|legal counsel|nurse|support (agent|specialist|representative)|soc analyst|security operations analyst|operations lead|office manager|executive assistant|business development|hr (manager|generalist))\b/i;
+const ENGINEERING_ROLE =
+  /\b(engineer\w*|developer\w*|programmer|swe|software|full[- ]?stack|back[- ]?end|front[- ]?end|devops|sre|architect|cto|machine learning|ml|data (engineer|scientist)|automation)\b/i;
+
+export function roleMismatch(title: string): boolean {
+  return NON_ENGINEERING_ROLE.test(title) && !ENGINEERING_ROLE.test(title);
+}
+
+/**
+ * The title names a core stack he does not work in.
+ *
+ * "Tech Lead Full-Stack Rails Engineer" scored 66 on React and Claude mentions
+ * from the company blurb, and "Senior .NET Full-stack Developer" scored 78. The
+ * letter can only answer those with an honest gap, which is a wasted send. A
+ * penalty, not a veto: a title that also names his stack ("Python/Go Backend")
+ * is left alone, since the Python half is real.
+ */
+// ".NET" and "C#" sit outside the \b group on purpose: \b needs a word character
+// on one side, so it can never match before "." or after "#". Inside the group
+// both terms silently never fired.
+const FOREIGN_STACK_TITLE =
+  /\b(rails|ruby|php|laravel|java(?!script)|golang|go developer|rust|ios|swift|android|kotlin|salesforce|sap|drupal|wordpress|shopify|unity|unreal|embedded|firmware|fpga)\b|(?<![\w.])\.net\b|\bc#(?!\w)/i;
+const OWN_STACK_TITLE = /\b(python|typescript|javascript|node|react|next\.?js|full[- ]?stack ai|ai|llm|automation|agents?)\b/i;
+
+export function foreignStack(title: string): boolean {
+  return FOREIGN_STACK_TITLE.test(title) && !OWN_STACK_TITLE.test(title);
+}
 
 // Graded penalties only. Absolute disqualifiers are in HARD_VETO_FLAGS above.
 const RED_FLAG_PENALTY: Record<string, number> = {
-  us_only: -35, eu_only: -20, onsite: -30,
+  eu_only: -20, onsite: -30,
 };
 
 function daysOld(s: string | null): number {
@@ -91,6 +139,7 @@ export function score(row: Scorable, rateFloor = 35): { score: number; why: stri
     if (flags.includes(f)) return { score: 0, why: `VETO:${f}` };
   }
   if (row.market_tier === 3) return { score: 0, why: "VETO:market-tier3" };
+  if (roleMismatch(row.title)) return { score: 0, why: "VETO:not-engineering" };
 
   const why: string[] = [];
   let s = 30;
@@ -127,6 +176,8 @@ export function score(row: Scorable, rateFloor = 35): { score: number; why: stri
   for (const [re, p] of SENIORITY_PENALTY) {
     if (re.test(row.title)) { s += p; why.push(`seniority${p}`); break; }
   }
+
+  if (foreignStack(row.title)) { s -= 30; why.push("foreign-stack-30"); }
 
   const mt = row.market_tier ?? 0;
   const mc = row.market_confidence ?? "low";

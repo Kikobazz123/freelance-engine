@@ -102,6 +102,35 @@ const STATEMENTS: [string, string][] = [
   ["digests status values",
     `ALTER TABLE digests ADD CONSTRAINT digests_status_check
        CHECK (status IN ('pending','sending','sent','skipped'))`],
+
+  /*
+   * When an unreviewed batch sends itself anyway.
+   *
+   * Requiring a tap meant three consecutive days produced nothing: the batch
+   * was posted, nobody pressed, and the drafts simply aged. A deadline keeps
+   * the review genuinely optional — press to send now, or let it go on its
+   * own. NULL means "wait indefinitely", which is what the Hold button sets.
+   */
+  ["digests.auto_release_at",
+    `ALTER TABLE digests ADD COLUMN IF NOT EXISTS auto_release_at TIMESTAMPTZ`],
+  ["digests.auto_released",
+    `ALTER TABLE digests ADD COLUMN IF NOT EXISTS auto_released BOOLEAN NOT NULL DEFAULT false`],
+  /*
+   * Phase 1 — reach. 90 of 101 recent high-fit listings had no address in the
+   * feed. contact_probe_at records that discovery looked, so no posting is
+   * ever fetched twice; description keeps the posting text for the writer.
+   */
+  ["listings.contact_probe_at",
+    `ALTER TABLE listings ADD COLUMN IF NOT EXISTS contact_probe_at TIMESTAMPTZ`],
+  ["listings.description",
+    `ALTER TABLE listings ADD COLUMN IF NOT EXISTS description TEXT`],
+  // The feed's own statement of who may apply ("USA Only", "Worldwide"). Kept
+  // so re-scoring can re-apply eligibility after a listing leaves the feeds.
+  ["listings.location",
+    `ALTER TABLE listings ADD COLUMN IF NOT EXISTS location TEXT`],
+  ["digests release index",
+    `CREATE INDEX IF NOT EXISTS digests_release_idx
+       ON digests (auto_release_at) WHERE status = 'pending'`],
 ];
 
 for (const [name, stmt] of STATEMENTS) {

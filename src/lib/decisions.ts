@@ -14,7 +14,7 @@
 import { sql, bidBudget, spendBid, platformOf, guard, type Platform } from "./db.js";
 import { answerCallback, editMessage, sendPlain, esc } from "./telegram.js";
 import { sendBatch } from "./drafts.js";
-import { updateCard, approvedButton } from "./digest.js";
+import { updateCard, approvedButton, controlText, controlButtons } from "./digest.js";
 
 const CONNECT_COST = 8; // Upwork proposals cost 4-16; assume the common case.
 
@@ -180,26 +180,60 @@ export async function approveAll(cbId: string, batchId: string): Promise<string>
     return `already_${rows[0].status}`;
   }
 
+  const r = await executeBatch(batchId, {
+    auto: false,
+    onLocked: (n) => answerCallback(cbId, `Approved — sending ${n}`),
+  });
+
+  if (r === "race_lost") await answerCallback(cbId, "Already handled", true);
+  if (r.startsWith("held")) await answerCallback(cbId, r.replace("held:", "Held: "), true);
+  return r;
+}
+
+/**
+ * Take the batch and send it. The single implementation behind both the button
+ * and the deadline.
+ *
+ * Ordering matters more than it looks. The card is rewritten to its decided
+ * state BEFORE the sending starts, because sending a dozen emails takes a
+ * minute or two and a button that sits there unchanged for that long reads as
+ * broken — which is exactly the bug that made a decision "recorded and
+ * completely invisible" once already.
+ *
+ * The conditional UPDATE to 'sending' is the lock, so the button and the
+ * deadline racing each other is harmless: whichever arrives second finds the
+ * row already moved and does nothing.
+ */
+export async function executeBatch(
+  batchId: string,
+  opts: { auto: boolean; onLocked?: (n: number) => Promise<unknown> } = { auto: true },
+): Promise<string> {
   const won = (await sql`
-    UPDATE digests SET status = 'sending', decided_at = now()
+    UPDATE digests
+    SET status = 'sending', decided_at = now(), auto_released = ${opts.auto}
     WHERE batch_id = ${batchId} AND status = 'pending'
-    RETURNING batch_id
-  `) as { batch_id: string }[];
-  if (!won.length) { await answerCallback(cbId, "Already handled", true); return "race_lost"; }
+    RETURNING batch_id, n_drafts
+  `) as { batch_id: string; n_drafts: number }[];
+  if (!won.length) return "race_lost";
 
   const g = await guard();
   if (!g.send) {
-    await sql`UPDATE digests SET status = 'pending', decided_at = NULL WHERE batch_id = ${batchId}`;
-    await answerCallback(cbId, `Held: ${g.reason}`, true);
-    return "held";
+    // Put it back so a later run can pick it up once the brake is off.
+    await sql`
+      UPDATE digests SET status = 'pending', decided_at = NULL, auto_released = false
+      WHERE batch_id = ${batchId}
+    `;
+    return `held:${g.reason}`;
   }
 
-  const n = rows[0].n_drafts;
-  await answerCallback(cbId, `Approved — sending ${n}`);
+  const n = won[0].n_drafts;
+  const banner = opts.auto ? "✅ AUTO-SENT" : "✅ APPROVED";
+  await opts.onLocked?.(n);
+
   // Instant, before any email goes out.
   await updateCard(
     batchId,
-    `BATCH ${batchId}\n\n✅ APPROVED\n\nSending ${n} application${n === 1 ? "" : "s"} now…`,
+    `BATCH ${batchId}\n\n${banner}\n\nSending ${n} application${n === 1 ? "" : "s"} now…`,
     approvedButton(batchId),
   );
 
@@ -215,7 +249,7 @@ export async function approveAll(cbId: string, batchId: string): Promise<string>
     await sql`UPDATE digests SET status = 'sent' WHERE batch_id = ${batchId}`;
     await updateCard(
       batchId,
-      `BATCH ${batchId}\n\n✅ APPROVED\n\nSending failed: ` +
+      `BATCH ${batchId}\n\n${banner}\n\nSending failed: ` +
       String((e as Error).message).slice(0, 200),
       approvedButton(batchId),
     );
@@ -228,7 +262,8 @@ export async function approveAll(cbId: string, batchId: string): Promise<string>
     [
       `BATCH ${batchId}`,
       ``,
-      `✅ APPROVED — ${result.sent} sent`,
+      `${banner} — ${result.sent} sent`,
+      ...(opts.auto ? [`(not reviewed in time, released automatically)`] : []),
       ...(result.failed ? [`${result.failed} failed`] : []),
       ...(result.skipped ? [`${result.skipped} skipped (opted out or already contacted)`] : []),
       ``,
@@ -239,6 +274,71 @@ export async function approveAll(cbId: string, batchId: string): Promise<string>
   );
 
   return `sent_${result.sent}`;
+}
+
+/**
+ * Release every batch whose deadline has passed.
+ *
+ * Shared by the scheduled task and the CLI so there is exactly one definition
+ * of "due". A held batch has auto_release_at NULL and is tested for explicitly.
+ */
+export async function releaseDueBatches(
+  log: (s: string) => void = () => {},
+): Promise<{ released: number; results: Record<string, string> }> {
+  const g = await guard();
+  if (!g.send) {
+    log(`holding, not releasing: ${g.reason}`);
+    return { released: 0, results: {} };
+  }
+
+  const due = (await sql`
+    SELECT batch_id, n_drafts FROM digests
+    WHERE status = 'pending'
+      AND auto_release_at IS NOT NULL
+      AND auto_release_at <= now()
+      AND n_drafts > 0
+    ORDER BY created_at
+  `) as { batch_id: string; n_drafts: number }[];
+
+  const results: Record<string, string> = {};
+  for (const d of due) {
+    try {
+      results[d.batch_id] = await executeBatch(d.batch_id, { auto: true });
+    } catch (e) {
+      // One bad batch must not strand the others.
+      results[d.batch_id] = `error: ${String((e as Error).message).slice(0, 120)}`;
+    }
+    log(`  ${d.batch_id} (${d.n_drafts} drafts) -> ${results[d.batch_id]}`);
+  }
+  return { released: due.length, results };
+}
+
+/**
+ * Cancel the deadline without deciding anything.
+ *
+ * The batch stays pending and keeps its Approve and Skip buttons; it just stops
+ * being on a clock. For when you want to read it properly this evening and must
+ * not have it go out meanwhile.
+ */
+export async function holdBatch(cbId: string, batchId: string): Promise<string> {
+  const won = (await sql`
+    UPDATE digests SET auto_release_at = NULL
+    WHERE batch_id = ${batchId} AND status = 'pending'
+    RETURNING n_drafts
+  `) as { n_drafts: number }[];
+
+  if (!won.length) {
+    await answerCallback(cbId, "Too late — that batch is already decided", true);
+    return "not_pending";
+  }
+
+  await answerCallback(cbId, "Held — this will not send on its own");
+  await updateCard(
+    batchId,
+    controlText(batchId, won[0].n_drafts, 0, null),
+    controlButtons(batchId, won[0].n_drafts).slice(0, 1), // keep Approve/Skip, drop Hold
+  );
+  return "held";
 }
 
 /** Discard a whole batch without sending any of it. */
@@ -274,6 +374,7 @@ export async function handleCallback(
   const rest = restParts.join(":");
   if (v0 === "all")  return { action: "approve_all", result: await approveAll(cb.id, rest) };
   if (v0 === "nall") return { action: "skip_all",    result: await skipAll(cb.id, rest) };
+  if (v0 === "hold") return { action: "hold",        result: await holdBatch(cb.id, rest) };
   if (v0 === "noop") {
     // The single button a decided card is left with. Confirms, changes nothing.
     const rows = (await sql`

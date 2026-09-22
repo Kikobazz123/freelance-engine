@@ -29,6 +29,8 @@ const SUITES = [
   "verify-callbacks",
   "verify-lane-a",
   "verify-digest",
+  "verify-discover",
+  "verify-eligibility",
 ];
 
 type Result = {

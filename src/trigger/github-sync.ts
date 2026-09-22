@@ -24,9 +24,20 @@ export const githubSync = schedules.task({
     const evidence = await buildEvidence();
     const path = "profile/github-evidence.json";
 
-    const previous: RepoEvidence[] = existsSync(path)
-      ? JSON.parse(readFileSync(path, "utf8")).repos ?? []
-      : [];
+    /*
+     * The database is the source of truth; the file is a local convenience.
+     *
+     * This used to read and write profile/github-evidence.json first and mirror
+     * to the database second. On Trigger.dev the profile/ directory does not
+     * exist, so writeFileSync threw ENOENT before the database write ever ran —
+     * every scheduled run failed, nothing was saved, and no new repo was ever
+     * reported. It failed four days out of four without anyone noticing.
+     */
+    const stored = (await sql`
+      SELECT value FROM pipeline_state WHERE key = 'github_evidence'
+    `) as { value: RepoEvidence[] }[];
+    const previous: RepoEvidence[] = stored[0]?.value
+      ?? (existsSync(path) ? JSON.parse(readFileSync(path, "utf8")).repos ?? [] : []);
     const prevByName = new Map(previous.map((r) => [r.name, r]));
 
     const added = evidence.filter((r) => !prevByName.has(r.name));
@@ -39,19 +50,21 @@ export const githubSync = schedules.task({
       return p && r.metrics.length > p.metrics.length;
     });
 
-    writeFileSync(path, JSON.stringify({
-      generated_at: new Date().toISOString(),
-      repo_count: evidence.length,
-      repos: evidence,
-    }, null, 2), "utf8");
-
-    // Mirror into the DB so a deployed task can read evidence without the repo
-    // filesystem, which is ephemeral on Trigger.dev.
     await sql`
       INSERT INTO pipeline_state (key, value, updated_at)
       VALUES ('github_evidence', ${JSON.stringify(evidence)}::jsonb, now())
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
     `;
+
+    // Local runs also refresh the file in the repo. Deployed runs have no
+    // profile/ directory, and must not fail for the lack of one.
+    if (existsSync("profile")) {
+      writeFileSync(path, JSON.stringify({
+        generated_at: new Date().toISOString(),
+        repo_count: evidence.length,
+        repos: evidence,
+      }, null, 2), "utf8");
+    }
 
     logger.info("github sync", {
       repos: evidence.length, added: added.length, updated: updated.length,

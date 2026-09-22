@@ -82,7 +82,7 @@ const TIER3: Record<string, RegExp> = {
   Nepal: /\b(nepal|kathmandu|\bNPR\b)\b/i,
   Kenya: /\b(kenya|nairobi|\bKES\b)\b/i,
   Ghana: /\b(ghana|accra|\bGHS\b)\b/i,
-  Nigeria: /\b(nigeria|nigerian|lagos|abuja|port harcourt|\bNGN\b|₦|\bnaira\b)\b/i,
+  Nigeria: /\b(nigeria|nigerian|lagos|abuja|\bNGN\b|₦|\bnaira\b)\b/i,
   Morocco: /\b(morocco|casablanca|rabat|\bMAD\b)\b/i,
   Myanmar: /\b(myanmar|burma|yangon)\b/i,
   Cambodia: /\b(cambodia|phnom penh)\b/i,

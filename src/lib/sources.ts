@@ -12,6 +12,7 @@
 import { createHash } from "node:crypto";
 import { marketOf, type MarketTier, type Confidence } from "./geo.js";
 import { extractContact } from "./contact.js";
+import { eligibilityFlag } from "./eligibility.js";
 
 const UA = "Mozilla/5.0 (compatible; freelance-engine/0.1; personal job search)";
 const TIMEOUT_MS = 20_000;
@@ -37,7 +38,7 @@ const STACK: Record<string, RegExp> = {
 export const RED_FLAGS: Record<string, RegExp> = {
   unpaid: /\bunpaid\b|\bequity only\b|\bno pay\b|\bvolunteer\b/i,
   equity_only: /\bequity[- ]only\b/i,
-  us_only: /\b(?:us|usa|u\.s\.)[- ]?only\b|\bonly\b[^.]{0,20}\b(?:us|usa)\b|\bmust be (?:located |based )?in the (?:us|usa|united states)\b|\b(?:us|usa)[- ]based\b|\bus citizens? only\b|\bauthoriz(?:ed|ation) to work in the (?:us|united states)\b|\bw2\b|\bgreen card\b/i,
+  us_only: /\b(?:us|usa|u\.s\.)[- ]?only\b|\bonly\b[^.]{0,20}\b(?:us|usa)\b|\bmust be (?:located |based )?in the (?:us|usa|united states)\b|\b(?:us|usa)[- ]based\b|\bus citizens? only\b|\bauthoriz(?:ed|ation) to work in the (?:us|united states)\b|\bw2\b|\bgreen card\b|\bremote\s*\(\s*(?:us\b|usa\b|u\.s\.)|\bus[- ]remote\b|\bremote[- ]us\b/i,
   eu_only: /\b(?:eu|uk|europe)[- ]?only\b|\bmust be (?:located |based )?in (?:the )?(?:eu|uk|europe)\b/i,
   onsite: /\bon[- ]?site\b|\bhybrid\b|\brelocat/i,
   clearance: /\bsecurity clearance\b|\bTS\/SCI\b/i,
@@ -65,6 +66,17 @@ export const SEEKING_WORK =
   /\bseeking work\b|\bwants to be hired\b|\blooking for (?:a )?(?:new )?(?:role|work|position|opportunit)/i;
 
 /* ---------------------------------------------------------------- helpers */
+
+/**
+ * How much posting text survives harvest.
+ *
+ * These were 700-1,500 characters, applied BEFORE the contact extractor ran.
+ * Postings put "send your CV to jobs@..." at the end, so the address was being
+ * thrown away by us, not missing from the feed: a page fetch of HN postings
+ * found apply lines that sat just past the old 1,500-character cut. The same
+ * cap bounds what is stored in listings.description for the letter writer.
+ */
+export const DESC_CAP = 6000;
 
 async function get(url: string, accept = "application/json"): Promise<string> {
   const ctrl = new AbortController();
@@ -97,6 +109,8 @@ export const strip = (s = ""): string =>
 type Raw = {
   title: string; company?: string; url: string;
   description?: string; posted_at?: string; rate_hint?: string;
+  /** The feed's own statement of where applicants may be. See eligibility.ts. */
+  location?: string;
 };
 
 /** Minimal RSS/Atom extraction — avoids an XML dependency in the task bundle. */
@@ -115,6 +129,8 @@ function parseFeed(xml: string): Raw[] {
       description: tag("description") || tag("summary") || tag("content"),
       posted_at: tag("pubDate") || tag("published") || tag("updated"),
       company: tag("dc:creator") || tag("author") || "",
+      // WeWorkRemotely: "Anywhere in the World" / "USA Only" / "North America Only".
+      location: tag("region"),
     });
   }
   return out;
@@ -135,8 +151,45 @@ export function parseRate(text = ""): [number | "", number | "", string] {
 
 const tagsFor = (t: string) =>
   Object.entries(STACK).filter(([, re]) => re.test(t)).map(([k]) => k).join("|");
-const flagsFor = (t: string) =>
-  Object.entries(RED_FLAGS).filter(([, re]) => re.test(t)).map(([k]) => k).join("|");
+/** Add the feed's own eligibility verdict to the text-derived flags, without duplicates. */
+export function withEligibility(flags: string, location?: string): string {
+  const f = flags.split("|").filter(Boolean);
+  const e = eligibilityFlag(location);
+  if (e && !f.includes(e)) f.push(e);
+  return f.join("|");
+}
+
+/** Anything that says the job can be done from somewhere else. */
+export const REMOTE_SIGNAL =
+  /\bremote\b|\banywhere\b|\bworldwide\b|\bdistributed\b|\bwork from home\b|\bwfh\b/i;
+
+/** Boards that list nothing but remote work — "on-site" there means an offsite, not an office. */
+const REMOTE_ONLY_BOARD = /^(WWR|Remotive|RemoteOK|Jobicy|Himalayas|WorkingNomads|Jobspresso|Arbeitnow)/;
+
+/**
+ * Red flags, plus one derived flag.
+ *
+ * `onsite` alone is too broad to act on: it matches "hybrid", "relocation
+ * assistance" and "REMOTE or ONSITE (SF)". But "Strobe Power | Site Reliability
+ * Engineer | ONSITE (SF)" scored 67 and got a letter written, for an office
+ * job on another continent. `onsite_only` is raised only when the
+ * posting says on-site, says remote nowhere, and is not from a remote-only
+ * board. That one is a hard veto; plain `onsite` stays a graded penalty.
+ */
+export const flagsFor = (t: string, source = "", title = "") => {
+  const flags = Object.entries(RED_FLAGS).filter(([, re]) => re.test(t)).map(([k]) => k);
+  if (REMOTE_ONLY_BOARD.test(source)) return flags.join("|");
+  /*
+   * Trust the title first. On HN it is the structured location field
+   * ("Company | Role | ONSITE (SF) | ..."), while descriptions use "remote" in
+   * unrelated senses — Strobe Power's mentioned it somewhere in 2,300 characters
+   * and so escaped the body-only rule while its title said ONSITE.
+   */
+  const titleOffice = /\bon[- ]?site\b|\bin[- ]office\b|\bin[- ]person\b/i.test(title) && !REMOTE_SIGNAL.test(title);
+  const bodyOffice = flags.includes("onsite") && !REMOTE_SIGNAL.test(t);
+  if (titleOffice || bodyOffice) flags.push("onsite_only");
+  return flags.join("|");
+};
 const relevant = (t: string) => {
   const l = t.toLowerCase();
   return KEYWORDS.some((k) => l.includes(k));
@@ -159,8 +212,9 @@ export const SOURCES: Source[] = [
     url: "https://remotive.com/api/remote-jobs?category=software-dev&limit=120",
     map: (d) => (d.jobs ?? []).map((j: any) => ({
       title: j.title, company: j.company_name, url: j.url,
-      description: `${j.title} ${strip(j.description).slice(0, 900)} ${j.salary ?? ""}`,
+      description: `${j.title} ${strip(j.description).slice(0, DESC_CAP)} ${j.salary ?? ""}`,
       posted_at: j.publication_date, rate_hint: j.salary ?? "",
+      location: j.candidate_required_location ?? "",
     })) },
 
   ...["dev", "data-science", "business", "marketing"].map((ind): Source => ({
@@ -170,17 +224,21 @@ export const SOURCES: Source[] = [
       title: j.jobTitle, company: j.companyName, url: j.url,
       description: `${j.jobTitle} ${strip(j.jobExcerpt)} ${(j.jobIndustry ?? []).join(" ")}`,
       posted_at: j.pubDate,
+      location: j.jobGeo ?? "",
       rate_hint: j.annualSalaryMin ? `$${j.annualSalaryMin}-$${j.annualSalaryMax}` : "",
     })),
   })),
 
-  ...["ai", "automation", "python"].map((tag): Source => ({
+  // typescript/react added 2026-09-22 after probing: 7 and 6 published
+  // addresses per ~100 items, the richest email yield of any feed tested.
+  ...["ai", "automation", "python", "typescript", "react", "machine-learning"].map((tag): Source => ({
     name: `RemoteOK-${tag}`, tier: "D", lane: "auto", type: "json",
     url: `https://remoteok.com/api?tags=${tag}`,
     map: (d) => (Array.isArray(d) ? d.slice(1) : []).map((j: any) => ({
       title: j.position ?? j.title, company: j.company, url: j.url ?? j.apply_url,
-      description: `${j.position ?? ""} ${(j.tags ?? []).join(" ")} ${strip(j.description).slice(0, 700)}`,
+      description: `${j.position ?? ""} ${(j.tags ?? []).join(" ")} ${strip(j.description).slice(0, DESC_CAP)}`,
       posted_at: j.date,
+      location: j.location ?? "",
       rate_hint: j.salary_min ? `$${j.salary_min}-$${j.salary_max}` : "",
     })),
   })),
@@ -190,19 +248,55 @@ export const SOURCES: Source[] = [
     url: `https://remotive.com/api/remote-jobs?category=${cat}&limit=60`,
     map: (d) => (d.jobs ?? []).map((j: any) => ({
       title: j.title, company: j.company_name, url: j.url,
-      description: `${j.title} ${strip(j.description).slice(0, 900)} ${j.salary ?? ""}`,
+      description: `${j.title} ${strip(j.description).slice(0, DESC_CAP)} ${j.salary ?? ""}`,
       posted_at: j.publication_date, rate_hint: j.salary ?? "",
+      location: j.candidate_required_location ?? "",
     })),
   })),
 
-  { name: "Himalayas-API", tier: "C", lane: "auto", type: "json",
-    url: "https://himalayas.app/jobs/api?limit=100",
-    map: (d) => (d.jobs ?? d.data ?? []).map((j: any) => ({
-      title: j.title, company: j.companyName ?? j.company, url: j.applicationLink ?? j.url,
-      description: `${j.title} ${strip(j.excerpt ?? j.description).slice(0, 700)}`,
-      posted_at: j.pubDate ?? j.publishedDate,
+  /*
+   * Himalayas, asked the right question. The unfiltered feed was 18 of 20 jobs
+   * locked to the US, Canada, India or Mexico. The search API's country filter
+   * returns only roles open to applicants in Nigeria (worldwide ones included),
+   * so eligibility is decided at the source instead of guessed from text.
+   * Max 20 per query; one query per core skill.
+   */
+  ...["python", "typescript", "automation", "ai engineer", "backend", "full stack"].map((q): Source => ({
+    name: `Himalayas-NG-${q.replace(/\s+/g, "-")}`, tier: "C", lane: "auto", type: "json",
+    url: `https://himalayas.app/jobs/api/search?q=${encodeURIComponent(q)}&country=NG&sort=recent`,
+    map: (d) => (d.jobs ?? []).map((j: any) => ({
+      title: j.title, company: j.companyName ?? j.company, url: j.applicationLink ?? j.guid,
+      description: `${j.title} ${strip(j.description ?? j.excerpt).slice(0, DESC_CAP)}`,
+      posted_at: j.pubDate ? new Date(j.pubDate * 1000).toISOString() : "",
       rate_hint: j.minSalary ? `$${j.minSalary}-$${j.maxSalary}` : "",
-    })) },
+      location: (j.locationRestrictions ?? []).length ? j.locationRestrictions.join(", ") : "Worldwide",
+    })),
+  })),
+
+  // Jobicy's own "Anywhere" scope: worldwide by definition.
+  ...["dev", "data-science"].map((ind): Source => ({
+    name: `Jobicy-anywhere-${ind}`, tier: "C", lane: "auto", type: "json",
+    url: `https://jobicy.com/api/v2/remote-jobs?count=100&geo=anywhere&industry=${ind}`,
+    map: (d) => (d.jobs ?? []).map((j: any) => ({
+      title: j.jobTitle, company: j.companyName, url: j.url,
+      description: `${j.jobTitle} ${strip(j.jobDescription ?? j.jobExcerpt).slice(0, DESC_CAP)}`,
+      posted_at: j.pubDate, location: j.jobGeo ?? "Anywhere",
+      rate_hint: j.annualSalaryMin ? `$${j.annualSalaryMin}-$${j.annualSalaryMax}` : "",
+    })),
+  })),
+
+  // RemoteJobs.org: free, no key; "contract" is the freelance-shaped slice.
+  ...["", "contract"].map((type): Source => ({
+    name: `RemoteJobs-${type || "programming"}`, tier: "C", lane: "auto", type: "json",
+    url: `https://remotejobs.org/api/v1/jobs?category=programming&limit=50${type ? `&type=${type}` : ""}`,
+    map: (d) => (d.jobs ?? d.data ?? []).map((j: any) => ({
+      title: j.title, company: j.company?.name ?? "", url: j.apply_url ?? j.url,
+      description: `${j.title} ${j.salary_text ?? ""} ${strip(j.description).slice(0, DESC_CAP)}`,
+      posted_at: j.posted_at, location: j.location ?? "",
+      rate_hint: j.salary_text ?? "",
+    })),
+  })),
+
 
   // Two-step. Searching comments directly returns the "who wants to be hired"
   // thread as well, which is competitors; and plain `search` ranks by relevance,
@@ -225,27 +319,62 @@ export const SOURCES: Source[] = [
           title: txt.slice(0, 130),
           company: (txt.split("|")[0] ?? "HN").trim().slice(0, 60),
           url: `https://news.ycombinator.com/item?id=${h.objectID}`,
-          description: txt.slice(0, 1500),
+          description: txt.slice(0, DESC_CAP),
           posted_at: h.created_at,
           rate_hint: txt,
         };
       });
     } },
 
+  // --- added 2026-09-22; each passed scripts/probe-candidates.mjs first ---
+
+  { name: "WorkingNomads", tier: "C", lane: "auto", type: "json",
+    url: "https://www.workingnomads.com/api/exposed_jobs/",
+    map: (d) => (Array.isArray(d) ? d : []).map((j: any) => ({
+      title: j.title, company: j.company_name, url: j.url,
+      description: `${j.title} ${j.location ?? ""} ${j.tags ?? ""} ${strip(j.description).slice(0, DESC_CAP)}`,
+      posted_at: j.pub_date, rate_hint: "",
+      location: j.location ?? "",
+    })) },
+
+  // Mostly on-site German roles; only the remote ones are any use from Nigeria.
+  { name: "Arbeitnow", tier: "C", lane: "auto", type: "json",
+    url: "https://www.arbeitnow.com/api/job-board-api",
+    map: (d) => (d.data ?? []).filter((j: any) => j.remote === true).map((j: any) => ({
+      title: j.title, company: j.company_name, url: j.url,
+      description: `${j.title} remote ${j.location ?? ""} ${(j.tags ?? []).join(" ")} ${strip(j.description).slice(0, DESC_CAP)}`,
+      posted_at: j.created_at ? new Date(j.created_at * 1000).toISOString() : "",
+      location: `${j.location ?? ""}, Germany`,
+      rate_hint: "",
+    })) },
+
+  /*
+   * r/forhire, [Hiring] posts only. The other ~85% are people selling their own
+   * services — competitors, not clients. Direct clients (tier F) with no platform
+   * fee; the rate floor and market tiering filter out the $5/hr posts. One
+   * request per harvest keeps well under Reddit's limits (the probe hit 429s
+   * only when hammering several subreddits back to back).
+   */
+  { name: "Reddit-forhire", tier: "F", lane: "auto", type: "custom",
+    fetch: async () =>
+      parseFeed(await get("https://www.reddit.com/r/forhire/new.rss?limit=100",
+        "application/atom+xml, application/xml, text/xml"))
+        .filter((i) => /^\s*\[hiring\]/i.test(i.title))
+        .map((i) => ({ ...i, title: i.title.replace(/^\s*\[hiring\]\s*/i, ""), rate_hint: i.description })) },
+
   // --- RSS (all verified live) ---
+  // Removed 2026-09-22: Larajobs (PHP only), Golangprojects (Go only) and
+  // Hasjob (India-based, a Tier 3 market). None could produce a match he can
+  // take; they only added rows for the scorer to reject.
   ...[
     ["WWR-All", "https://weworkremotely.com/remote-jobs.rss", "C"],
     ["WWR-FullStack", "https://weworkremotely.com/categories/remote-full-stack-programming-jobs.rss", "C"],
     ["WWR-Programming", "https://weworkremotely.com/categories/remote-programming-jobs.rss", "C"],
     ["WWR-DevOps", "https://weworkremotely.com/categories/remote-devops-sysadmin-jobs.rss", "C"],
     ["WWR-Backend", "https://weworkremotely.com/categories/remote-back-end-programming-jobs.rss", "C"],
-    ["Himalayas-RSS", "https://himalayas.app/jobs/rss?categories=software-engineering", "C"],
     ["Jobspresso", "https://jobspresso.co/?feed=job_feed", "C"],
     ["PythonJobs", "https://www.python.org/jobs/feed/rss/", "C"],
     ["Cryptocurrency-Jobs", "https://cryptocurrencyjobs.co/index.xml", "D"],
-    ["Hasjob", "https://hasjob.co/feed", "C"],
-    ["Golangprojects", "https://www.golangprojects.com/rss.xml", "C"],
-    ["Larajobs", "https://larajobs.com/feed", "C"],
   ].map(([name, url, tier]): Source => ({
     name, tier, lane: "auto", type: "rss", url,
   })),
@@ -254,7 +383,8 @@ export const SOURCES: Source[] = [
 
   // Marketplaces. lane:"approve" is load-bearing — nothing here is ever
   // auto-submitted, because that is exactly what gets accounts permanently banned.
-  ...["automation", "ai agent", "python", "api integration", "chatbot"].map((kw): Source => ({
+  ...["automation", "ai agent", "python", "api integration", "chatbot",
+      "n8n", "web scraping", "next.js"].map((kw): Source => ({
     name: `Freelancer-${kw.replace(/\s+/g, "-")}`, tier: "A", lane: "approve", type: "rss",
     url: `https://www.freelancer.com/rss.xml?keyword=${encodeURIComponent(kw)}`,
   })),
@@ -272,6 +402,8 @@ export type Listing = {
   market: string; market_tier: MarketTier; market_confidence: Confidence;
   market_signal: string;
   contact_email: string; contact_source: string;
+  description?: string;
+  location?: string;
 };
 
 export type SourceReport = {
@@ -320,13 +452,17 @@ export async function harvestAll(concurrency = 6): Promise<{
         const ct = extractContact(blob);
         rows.push({
           contact_email: ct?.email ?? "", contact_source: ct ? src.name : "",
+          description: strip(r.description ?? "").slice(0, 4000),
           market: mk.market, market_tier: mk.tier,
           market_confidence: mk.confidence, market_signal: mk.signal,
           id: "", source: src.name, tier: src.tier, lane: src.lane,
           title: r.title.slice(0, 160), company: (r.company ?? "").slice(0, 80), url: r.url,
           rate_min: rmin, rate_max: rmax, rate_type: rtype,
           posted_at: r.posted_at ?? "",
-          stack_tags: tagsFor(blob), red_flags: flagsFor(blob), fit_score: "",
+          stack_tags: tagsFor(blob),
+          red_flags: withEligibility(flagsFor(blob, src.name, r.title), r.location),
+          location: (r.location ?? "").slice(0, 300),
+          fit_score: "",
         });
         kept++;
       }

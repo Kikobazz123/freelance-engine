@@ -135,7 +135,7 @@ export async function complete(system: string, user: string): Promise<LlmResult>
       run: (k: string, m: string) =>
         openaiCompatible("https://openrouter.ai/api/v1/chat/completions", k, m, system, user, {
           // OpenRouter asks for these on free models; absence can mean deprioritisation.
-          "HTTP-Referer": "https://github.com/",
+          "HTTP-Referer": `https://github.com/${IDENTITY.githubUser}`,
           "X-Title": "freelance-engine",
         }),
     },
@@ -206,4 +206,5 @@ export async function completeValidated(
   }
 
   return { ...second, violations: validate(second.text), retried: true };
-}
+}import { IDENTITY } from "../config.js";
+

@@ -13,7 +13,7 @@
 
 import "dotenv/config";
 import { sql, getState, setState } from "../src/lib/db.js";
-import { approveAll, skipAll } from "../src/lib/decisions.js";
+import { approveAll, skipAll, holdBatch, releaseDueBatches } from "../src/lib/decisions.js";
 import { sendBatch } from "../src/lib/drafts.js";
 import { controlButtons, approvedButton, controlText } from "../src/lib/digest.js";
 
@@ -64,6 +64,67 @@ try {
     /never|human click/i.test(controlText(bigBatch, 12, 3)),
     "the card says marketplace proposals are not included",
   );
+
+  /* ------------------------------------------- the deadline and the hold */
+  console.log("\n--- an unreviewed batch sends itself, unless held ---");
+
+  ok(
+    /sends? automatically in 6h/i.test(controlText(bigBatch, 5, 0)),
+    "the card says when it will send on its own",
+  );
+  ok(
+    /will NOT send on its own/i.test(controlText(bigBatch, 5, 0, null)),
+    "a held card says it will not",
+  );
+  ok(
+    controlButtons(bigBatch, 5).flat().some((b) => b.callback_data.startsWith("hold:")),
+    "the card offers a Hold button",
+  );
+
+  await cleanupRows();
+  await sql`
+    INSERT INTO listings (id, source, tier, lane, title, url, fit_score)
+    VALUES (${TEST_LISTING}, 'verify', 'A', 'auto', 'verify digest listing',
+            'https://example.invalid/verify', 90)
+    ON CONFLICT (id) DO NOTHING
+  `;
+  // n_drafts > 0 so the sweep considers it, but no draft rows exist, so the
+  // live path runs end to end and sends nothing.
+  await sql`
+    INSERT INTO digests (batch_id, n_drafts, status, auto_release_at)
+    VALUES (${TEST_BATCH}, 1, 'pending', now() - interval '1 hour')
+  `;
+
+  await holdBatch("fake-callback-id", TEST_BATCH);
+  const held = (await sql`
+    SELECT auto_release_at, status FROM digests WHERE batch_id = ${TEST_BATCH}
+  `) as { auto_release_at: string | null; status: string }[];
+  ok(held[0].auto_release_at === null, "Hold clears the deadline");
+  ok(held[0].status === "pending", "Hold does not decide the batch", held[0].status);
+
+  const skipped = await releaseDueBatches();
+  ok(
+    !(TEST_BATCH in skipped.results),
+    "a held batch is never auto-released",
+    JSON.stringify(skipped.results),
+  );
+
+  // Re-arm it and confirm the sweep does take it.
+  await sql`
+    UPDATE digests SET auto_release_at = now() - interval '1 hour'
+    WHERE batch_id = ${TEST_BATCH}
+  `;
+  const swept = await releaseDueBatches();
+  ok(TEST_BATCH in swept.results, "an overdue batch is picked up", JSON.stringify(swept.results));
+
+  const done = (await sql`
+    SELECT status, auto_released FROM digests WHERE batch_id = ${TEST_BATCH}
+  `) as { status: string; auto_released: boolean }[];
+  ok(done[0]?.status === "sent", "the released batch is marked decided", done[0]?.status);
+  ok(done[0]?.auto_released === true, "and flagged as auto-released, not hand-approved");
+
+  const swept2 = await releaseDueBatches();
+  ok(!(TEST_BATCH in swept2.results), "a released batch is not released twice");
 
   /* -------------------------------------------------- the send-side brakes */
   console.log("\n--- sendBatch refuses to run while held ---");

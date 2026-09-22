@@ -15,6 +15,8 @@
  * BrightPath's rubric: the model produces, deterministic code decides.
  */
 
+import { IDENTITY } from "../config.js";
+
 /**
  * Technologies that recur in postings and would be a lie in an email from this
  * profile. An explicit deny-list, not "anything not on an allow-list" — free text
@@ -58,8 +60,11 @@ const OWNS_SKILL = [
  * location on the very first test run.
  */
 const OK_PLACES = [
-  "nigeria", "wat", "utc", "west africa", "port harcourt", "rivers state",
+  "nigeria", "wat", "utc", "west africa",
   "africa", "remote", "your timezone", "european hours", "us hours",
+  // His own city and region come from config, so they are not hardcoded here —
+  // this file ships in the public repo.
+  ...IDENTITY.location.toLowerCase().split(/\s*,\s*/).filter(Boolean),
 ];
 
 /** Words the location pattern can capture that are not places. */

@@ -27,13 +27,28 @@ process.on("SIGINT", () => {
 });
 
 console.log(`long-polling Telegram every ${POLL_SECONDS}s. Ctrl-C to stop.`);
-console.log(`${await pendingCount()} proposal(s) awaiting a decision.\n`);
+// A database blip must not stop the watcher before it has started.
+try {
+  console.log(`${await pendingCount()} proposal(s) awaiting a decision.\n`);
+} catch {
+  console.log(`(could not reach the database for a pending count — starting anyway)\n`);
+}
 
 let consecutiveErrors = 0;
 
 while (running) {
-  const offset = await getState<number>("telegram_offset", 0);
   try {
+    /*
+     * This read USED to sit outside the try, and that killed the watcher.
+     *
+     * Neon resolves through DNS on every call, and a single ENOTFOUND threw
+     * from here — outside any handler — so the loop exited and every button
+     * press after that went unanswered until someone noticed. The backoff
+     * below was already correct; it just never got the chance to run.
+     *
+     * Everything that can touch the network now lives inside the try.
+     */
+    const offset = await getState<number>("telegram_offset", 0);
     const { callbacks, commands, nextOffset } = await getUpdates(offset, POLL_SECONDS);
 
     for (const cb of callbacks) {

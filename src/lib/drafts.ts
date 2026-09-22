@@ -42,6 +42,9 @@ export type Draft = {
 
 const CV_PATH = "cv/Lordmark-Dorgu-AI-Automation-Engineer.pdf";
 
+/** Same bar staging uses. Re-applied at send time. */
+export const MIN_SEND_FIT = 65;
+
 /** A short, sortable, human-readable batch id: 20260918-3f9a. */
 function newBatchId(): string {
   const d = new Date().toISOString().slice(0, 10).replace(/-/g, "");
@@ -58,7 +61,7 @@ function newBatchId(): string {
 async function candidates(limit: number) {
   return (await sql`
     SELECT l.id, l.title, l.company, l.url, l.source, l.contact_email, l.fit_score,
-           l.stack_tags, l.market
+           l.stack_tags, l.market, l.description
     FROM listings l
     WHERE l.lane = 'auto' AND l.contact_email IS NOT NULL AND l.fit_score >= 65
       AND coalesce(l.market_tier, 0) <> 3
@@ -130,10 +133,15 @@ export async function stageBatch(
     }
   }
 
-  await sql`
-    INSERT INTO digests (batch_id, n_drafts) VALUES (${batchId}, ${staged})
-    ON CONFLICT (batch_id) DO UPDATE SET n_drafts = EXCLUDED.n_drafts
-  `;
+  // No row for a batch with nothing in it. The morning run on a day with no
+  // candidates used to leave a 'pending' zero-draft batch behind every time,
+  // which then had to be swept up by hand.
+  if (staged || blocked) {
+    await sql`
+      INSERT INTO digests (batch_id, n_drafts) VALUES (${batchId}, ${staged})
+      ON CONFLICT (batch_id) DO UPDATE SET n_drafts = EXCLUDED.n_drafts
+    `;
+  }
 
   return { batchId, staged, blocked };
 }
@@ -177,7 +185,8 @@ export async function sendBatch(
   if (!g.send) throw new Error(`refusing to send: ${g.reason}`);
 
   const drafts = (await sql`
-    SELECT d.id, d.to_address, d.subject, d.salutation, d.body, l.source
+    SELECT d.id, d.to_address, d.subject, d.salutation, d.body, l.source,
+           l.fit_score, l.score_why
     FROM outreach_drafts d
     JOIN listings l ON l.id = d.listing_id
     WHERE d.batch_id = ${batchId} AND d.status = 'approved'
@@ -193,6 +202,25 @@ export async function sendBatch(
   let sent = 0, failed = 0, skipped = 0;
 
   for (const d of drafts) {
+    /*
+     * The listing must still qualify NOW, not just when it was staged.
+     *
+     * A batch waits up to six hours before it releases, and scoring rules can
+     * change in between. On 2026-09-22 an office-only veto landed while a batch
+     * was already posted; without this check its drafts would have gone out
+     * under the old rules. Whatever is true at the moment of sending decides.
+     */
+    if ((d.fit_score ?? 0) < MIN_SEND_FIT) {
+      await sql`
+        UPDATE outreach_drafts SET status = 'skipped',
+          blocked_reason = ${`no longer qualifies: ${d.score_why ?? `fit ${d.fit_score}`}`}
+        WHERE id = ${d.id}
+      `;
+      log(`  SKIP    ${d.to_address} (no longer qualifies: ${d.score_why ?? d.fit_score})`);
+      skipped++;
+      continue;
+    }
+
     // Someone may have opted out, or been reached another way, between approval
     // and here. Cheap to check, and the alternative is a complaint.
     const sup = (await sql`
