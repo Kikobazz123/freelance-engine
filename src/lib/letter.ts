@@ -107,6 +107,26 @@ ${paras}
 </body></html>`;
 }
 
+/**
+ * The same letter shaped for an application form's cover-letter box.
+ *
+ * No letterhead: the form already has fields for email and phone, and a pasted
+ * block of contact details at the top of a textarea reads as a template. It
+ * keeps the portfolio links, which a form usually has nowhere else to put.
+ */
+export function formLetter(salutation: string, body: string): string {
+  return [
+    salutation,
+    "",
+    stripFurniture(body),
+    "",
+    "Kind regards,",
+    SENDER_NAME,
+    `${TITLE} · ${COMPANY}`,
+    `${GITHUB} · ${LINKEDIN}`,
+  ].join("\n");
+}
+
 /** Same letter, for clients that do not render HTML. */
 export function textLetter(salutation: string, body: string): string {
   body = stripFurniture(body);

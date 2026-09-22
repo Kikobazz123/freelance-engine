@@ -42,6 +42,9 @@ export type Draft = {
 
 const CV_PATH = "cv/Lordmark-Dorgu-AI-Automation-Engineer.pdf";
 
+/** One application that actually left, for the Telegram confirmation. */
+export type SentItem = { to: string; title: string; company: string | null; url: string };
+
 /** Same bar staging uses. Re-applied at send time. */
 export const MIN_SEND_FIT = 65;
 
@@ -180,13 +183,13 @@ export async function latestOpenBatch(): Promise<string | null> {
 export async function sendBatch(
   batchId: string,
   log: (s: string) => void = () => {},
-): Promise<{ sent: number; failed: number; skipped: number }> {
+): Promise<{ sent: number; failed: number; skipped: number; sentList: SentItem[] }> {
   const g = await guard();
   if (!g.send) throw new Error(`refusing to send: ${g.reason}`);
 
   const drafts = (await sql`
     SELECT d.id, d.to_address, d.subject, d.salutation, d.body, l.source,
-           l.fit_score, l.score_why
+           l.fit_score, l.score_why, l.title, l.company, l.url
     FROM outreach_drafts d
     JOIN listings l ON l.id = d.listing_id
     WHERE d.batch_id = ${batchId} AND d.status = 'approved'
@@ -200,6 +203,7 @@ export async function sendBatch(
   };
 
   let sent = 0, failed = 0, skipped = 0;
+  const sentList: SentItem[] = [];
 
   for (const d of drafts) {
     /*
@@ -259,6 +263,7 @@ export async function sendBatch(
       `;
       log(`  SENT    ${d.to_address}`);
       sent++;
+      sentList.push({ to: d.to_address, title: d.title, company: d.company, url: d.url });
     } catch (e) {
       const msg = String((e as Error).message).slice(0, 160);
       await sql`
@@ -270,5 +275,5 @@ export async function sendBatch(
     }
   }
 
-  return { sent, failed, skipped };
+  return { sent, failed, skipped, sentList };
 }

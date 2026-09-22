@@ -1,7 +1,7 @@
 import { schedules, logger } from "@trigger.dev/sdk";
 import { getState, setState } from "../lib/db.js";
 import { getUpdates } from "../lib/telegram.js";
-import { handleCallback } from "../lib/decisions.js";
+import { handleCallback, releaseDueBatches } from "../lib/decisions.js";
 import { handleCommand } from "../lib/commands.js";
 
 /**
@@ -17,11 +17,19 @@ import { handleCommand } from "../lib/commands.js";
  *
  * For instant response while working through a morning batch, run the local
  * long-poller instead: `npm run approvals`.
+ *
+ * It also releases overdue batches. That used to be its own every-15-minutes
+ * task, but Trigger.dev's free plan caps an account at 10 schedules and apply
+ * kits needed the slot. Folding it in here is the natural fit — both are "react
+ * to state" loops — and it releases within 5 minutes of a deadline rather than
+ * 15. Button presses are handled FIRST, so a Hold or Approve tapped just before
+ * a deadline always wins over the release.
  */
 export const pollCallbacks = schedules.task({
   id: "poll-callbacks",
   cron: { pattern: "*/5 5-22 * * *", timezone: "Africa/Lagos" },
-  maxDuration: 120,
+  // Raised from 120s: a released batch of 20 letters takes over two minutes.
+  maxDuration: 600,
   run: async () => {
     const offset = await getState<number>("telegram_offset", 0);
 
@@ -33,7 +41,8 @@ export const pollCallbacks = schedules.task({
       // Still advance: Telegram redelivers until the offset moves, and a stuck
       // offset would replay every old update on every run.
       if (nextOffset !== offset) await setState("telegram_offset", nextOffset);
-      return { callbacks: 0, commands: 0 };
+      const rel = await releaseDueBatches((s) => logger.info(s));
+      return { callbacks: 0, commands: 0, released: rel.released };
     }
 
     const results: string[] = [];
@@ -65,9 +74,12 @@ export const pollCallbacks = schedules.task({
     // which is safe because every handler is idempotent.
     await setState("telegram_offset", nextOffset);
 
+    // Presses first, deadlines second — see the header.
+    const rel = await releaseDueBatches((s) => logger.info(s));
+
     logger.info("callbacks drained", {
-      callbacks: callbacks.length, commands: commands.length, results,
+      callbacks: callbacks.length, commands: commands.length, results, released: rel.released,
     });
-    return { callbacks: callbacks.length, commands: commands.length, results };
+    return { callbacks: callbacks.length, commands: commands.length, results, released: rel.released };
   },
 });

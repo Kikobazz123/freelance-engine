@@ -41,7 +41,8 @@ export type StateKey =
   | "daily_cap_auto"
   | "daily_cap_approve"
   | "rate_floor_hourly"
-  | "telegram_offset";
+  | "telegram_offset"
+  | "daily_cap_kits";
 
 export async function getState<T = unknown>(key: StateKey, fallback: T): Promise<T> {
   const rows = (await conn()`

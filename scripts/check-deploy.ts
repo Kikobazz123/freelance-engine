@@ -36,9 +36,9 @@ for (const s of list.data ?? []) {
 
 const EXPECTED = ["harvest","score","generate","dispatch","send-lane-a",
                   "inbox-watch","poll-callbacks","calibrate","github-sync",
-                  // Without this one, an untapped batch never sends — the exact
-                  // failure that kept the pipeline dark for three days.
-                  "auto-release"];
+                  // poll-callbacks also releases overdue batches (it absorbed
+                  // auto-release when the free plan's 10-schedule cap was hit).
+                  "apply-kits"];
 const seen = new Set((list.data ?? []).map((s) => s.task));
 const missing = EXPECTED.filter((t) => !seen.has(t));
 if (env === "prod") {

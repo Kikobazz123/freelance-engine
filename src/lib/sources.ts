@@ -38,7 +38,7 @@ const STACK: Record<string, RegExp> = {
 export const RED_FLAGS: Record<string, RegExp> = {
   unpaid: /\bunpaid\b|\bequity only\b|\bno pay\b|\bvolunteer\b/i,
   equity_only: /\bequity[- ]only\b/i,
-  us_only: /\b(?:us|usa|u\.s\.)[- ]?only\b|\bonly\b[^.]{0,20}\b(?:us|usa)\b|\bmust be (?:located |based )?in the (?:us|usa|united states)\b|\b(?:us|usa)[- ]based\b|\bus citizens? only\b|\bauthoriz(?:ed|ation) to work in the (?:us|united states)\b|\bw2\b|\bgreen card\b|\bremote\s*\(\s*(?:us\b|usa\b|u\.s\.)|\bus[- ]remote\b|\bremote[- ]us\b/i,
+  us_only: /\b(?:us|usa|u\.s\.)[- ]?only\b|\bonly\b[^.]{0,20}\b(?:us|usa)\b|\bmust be (?:located |based )?in the (?:us|usa|united states)\b|(?:\bus|\busa|\bu\.s\.)[- ]?based\b|\bus citizens? only\b|\bauthoriz(?:ed|ation) to work in the (?:us|united states)\b|\bw2\b|\bgreen card\b|\bremote\s*\(\s*(?:us\b|usa\b|u\.s\.)|\bus[- ]remote\b|\bremote[- ]us\b/i,
   eu_only: /\b(?:eu|uk|europe)[- ]?only\b|\bmust be (?:located |based )?in (?:the )?(?:eu|uk|europe)\b/i,
   onsite: /\bon[- ]?site\b|\bhybrid\b|\brelocat/i,
   clearance: /\bsecurity clearance\b|\bTS\/SCI\b/i,

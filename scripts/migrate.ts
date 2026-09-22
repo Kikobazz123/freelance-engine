@@ -128,6 +128,41 @@ const STATEMENTS: [string, string][] = [
   // so re-scoring can re-apply eligibility after a listing leaves the feeds.
   ["listings.location",
     `ALTER TABLE listings ADD COLUMN IF NOT EXISTS location TEXT`],
+  /*
+   * Apply kits — eligible, high-fit jobs whose employer takes applications
+   * through a form, not an email. 193 of 213 eligible matches in one 30-day
+   * window were form-only. The engine writes the cover letter and posts the
+   * link; he submits it himself and confirms. Submitting a form on his behalf
+   * would breach those sites' terms, so no code path does.
+   */
+  ["apply_kits table",
+    `CREATE TABLE IF NOT EXISTS apply_kits (
+       id                  BIGSERIAL PRIMARY KEY,
+       listing_id          TEXT NOT NULL UNIQUE,
+       body                TEXT NOT NULL,
+       status              TEXT NOT NULL DEFAULT 'pending',
+       blocked_reason      TEXT,
+       telegram_chat_id    BIGINT,
+       telegram_message_id BIGINT,
+       created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+       decided_at          TIMESTAMPTZ
+     )`],
+  ["apply_kits status check",
+    `ALTER TABLE apply_kits DROP CONSTRAINT IF EXISTS apply_kits_status_check`],
+  ["apply_kits status values",
+    `ALTER TABLE apply_kits ADD CONSTRAINT apply_kits_status_check
+       CHECK (status IN ('pending','applied','skipped','blocked'))`],
+  // A confirmed form application is recorded in sends as lane 'form'. The old
+  // check allowed only 'auto' and 'approve', so the first "I applied" tap would
+  // have thrown — caught before deploy by reading the constraint.
+  ["sends lane check widened",
+    `ALTER TABLE sends DROP CONSTRAINT IF EXISTS sends_lane_check`],
+  ["sends lane values",
+    `ALTER TABLE sends ADD CONSTRAINT sends_lane_check
+       CHECK (lane IN ('auto','approve','form'))`],
+  ["pipeline_state seed: daily_cap_kits",
+    `INSERT INTO pipeline_state (key, value) VALUES ('daily_cap_kits', '8'::jsonb)
+       ON CONFLICT (key) DO NOTHING`],
   ["digests release index",
     `CREATE INDEX IF NOT EXISTS digests_release_idx
        ON digests (auto_release_at) WHERE status = 'pending'`],

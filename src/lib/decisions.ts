@@ -13,8 +13,9 @@
 
 import { sql, bidBudget, spendBid, platformOf, guard, type Platform } from "./db.js";
 import { answerCallback, editMessage, sendPlain, esc } from "./telegram.js";
-import { sendBatch } from "./drafts.js";
+import { sendBatch, type SentItem } from "./drafts.js";
 import { updateCard, approvedButton, controlText, controlButtons } from "./digest.js";
+import { markApplied, skipKit } from "./kits.js";
 
 const CONNECT_COST = 8; // Upwork proposals cost 4-16; assume the common case.
 
@@ -242,7 +243,7 @@ export async function executeBatch(
     WHERE batch_id = ${batchId} AND status = 'draft'
   `;
 
-  let result: { sent: number; failed: number; skipped: number };
+  let result: Awaited<ReturnType<typeof sendBatch>>;
   try {
     result = await sendBatch(batchId);
   } catch (e) {
@@ -273,7 +274,31 @@ export async function executeBatch(
     approvedButton(batchId),
   );
 
+  /*
+   * A separate confirmation naming every application that actually left.
+   *
+   * The card shows counts; this shows *who*, so there is a plain record in the
+   * chat of which employers now have his CV — and so a skipped or failed draft
+   * is visible by its absence rather than hidden inside a number.
+   */
+  if (result.sentList.length) {
+    await sendPlain(confirmationText(batchId, result.sentList, opts.auto));
+  }
+
   return `sent_${result.sent}`;
+}
+
+/** The per-application confirmation posted after a batch sends. */
+export function confirmationText(batchId: string, sent: SentItem[], auto: boolean): string {
+  return [
+    `✅ CONFIRMED — ${sent.length} application${sent.length === 1 ? "" : "s"} sent` +
+      (auto ? " (auto-released)" : ""),
+    `batch ${batchId}`,
+    ``,
+    ...sent.map((s, i) =>
+      `${i + 1}. ${(s.company ? `${s.company} — ` : "")}${s.title.replace(/\s+/g, " ").slice(0, 70)}\n` +
+      `   to: ${s.to}\n   ${s.url}`),
+  ].join("\n");
 }
 
 /**
@@ -375,6 +400,13 @@ export async function handleCallback(
   if (v0 === "all")  return { action: "approve_all", result: await approveAll(cb.id, rest) };
   if (v0 === "nall") return { action: "skip_all",    result: await skipAll(cb.id, rest) };
   if (v0 === "hold") return { action: "hold",        result: await holdBatch(cb.id, rest) };
+  // Apply kits — form-only jobs. "I applied" is his confirmation after submitting.
+  if (v0 === "ka")   return { action: "kit_applied", result: await markApplied(cb.id, Number(rest)) };
+  if (v0 === "ks")   return { action: "kit_skip",    result: await skipKit(cb.id, Number(rest)) };
+  if (v0 === "noopk") {
+    await answerCallback(cb.id, "Already recorded — nothing left to do", true);
+    return { action: "noop", result: "kit_decided" };
+  }
   if (v0 === "noop") {
     // The single button a decided card is left with. Confirms, changes nothing.
     const rows = (await sql`

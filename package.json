@@ -23,7 +23,8 @@
     "check:deploy": "tsx scripts/check-deploy.ts",
     "now": "tsx scripts/run-now.ts",
     "digest": "tsx scripts/digest.ts",
-    "verify:chain": "tsx scripts/verify.ts && tsx scripts/verify-extra.ts && tsx scripts/verify-callbacks.ts && tsx scripts/verify-lane-a.ts && tsx scripts/verify-digest.ts"
+    "verify:chain": "tsx scripts/verify.ts && tsx scripts/verify-extra.ts && tsx scripts/verify-callbacks.ts && tsx scripts/verify-lane-a.ts && tsx scripts/verify-digest.ts",
+    "kits": "tsx scripts/kits.ts"
   },
   "dependencies": {
     "@trigger.dev/sdk": "4.4.0",

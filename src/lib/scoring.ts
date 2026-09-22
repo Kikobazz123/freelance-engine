@@ -97,6 +97,21 @@ const NON_ENGINEERING_ROLE =
 const ENGINEERING_ROLE =
   /\b(engineer\w*|developer\w*|programmer|swe|software|full[- ]?stack|back[- ]?end|front[- ]?end|devops|sre|architect|cto|machine learning|ml|data (engineer|scientist)|automation)\b/i;
 
+/**
+ * The job is advertised in a language he does not work in.
+ *
+ * "Pessoa Engenheira de Dados Sênior" reached an apply kit: Himalayas marked it
+ * worldwide, and the stack tags were right, but a Portuguese title means a
+ * Portuguese-speaking team. Title words only, and only role nouns — a German
+ * posting written in English still says "(m/w/d)", and that one is fine.
+ */
+const FOREIGN_LANGUAGE_TITLE =
+  /\b(pessoa|engenheir[oa]s?|desenvolvedor[a]?|analista de|vaga|desarrollador[a]?|ingenier[oa]|programador[a]?|entwickler(in)?|ingénieur|développeur|développeuse|sviluppatore|ontwikkelaar)\b/i;
+
+export function foreignLanguage(title: string): boolean {
+  return FOREIGN_LANGUAGE_TITLE.test(title);
+}
+
 export function roleMismatch(title: string): boolean {
   return NON_ENGINEERING_ROLE.test(title) && !ENGINEERING_ROLE.test(title);
 }
@@ -140,6 +155,7 @@ export function score(row: Scorable, rateFloor = 35): { score: number; why: stri
   }
   if (row.market_tier === 3) return { score: 0, why: "VETO:market-tier3" };
   if (roleMismatch(row.title)) return { score: 0, why: "VETO:not-engineering" };
+  if (foreignLanguage(row.title)) return { score: 0, why: "VETO:foreign-language" };
 
   const why: string[] = [];
   let s = 30;
