@@ -27,7 +27,8 @@
     "kits": "tsx scripts/kits.ts",
     "dev:functions": "tsx scripts/dev-server.ts",
     "dev:inngest": "npx --yes inngest-cli@latest dev -u http://localhost:3000/api/inngest --no-discovery",
-    "cutover": "node scripts/cutover.mjs"
+    "cutover": "node scripts/cutover.mjs",
+    "job": "node scripts/job.mjs"
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.10.4",

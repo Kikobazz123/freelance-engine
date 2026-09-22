@@ -324,12 +324,23 @@ export async function releaseDueBatches(
     return { released: 0, results: {} };
   }
 
+  /*
+   * In a test run this must only ever touch the suite's own batches.
+   *
+   * verify-digest calls this against the real database, and on 2026-09-22 that
+   * released two genuine batches and sent five real applications from inside a
+   * test — with the Telegram confirmation suppressed, because suites silence
+   * Telegram. Good emails, but nobody chose to send them at that moment.
+   */
+  const testOnly = process.env.TEST_MODE === "1";
+
   const due = (await sql`
     SELECT batch_id, n_drafts FROM digests
     WHERE status = 'pending'
       AND auto_release_at IS NOT NULL
       AND auto_release_at <= now()
       AND n_drafts > 0
+      AND (${testOnly} = false OR batch_id LIKE 'verify-%')
     ORDER BY created_at
   `) as { batch_id: string; n_drafts: number }[];
 
@@ -349,18 +360,32 @@ export async function releaseDueBatches(
 }
 
 /**
- * Finish a batch whose send was cut off.
+ * Finish any batch that still has approved drafts nobody sent.
  *
- * A serverless run has a hard time limit (five minutes on the free Vercel
- * plan). If it ends mid-batch, the batch stays 'sending' and nothing ever picks
- * it up again. Resuming is safe by construction: sendBatch only sends drafts
- * still marked 'approved' (each is marked 'sent' the moment it goes), and the
- * unique index on sends(to_address) refuses a second send to anyone.
+ * Two ways that happens, both seen:
+ *   - a run is cut off mid-batch (serverless time limit) and the batch stays
+ *     'sending' forever;
+ *   - the send throws at the start, the error handler marks the batch 'sent',
+ *     and every draft is left 'approved'. On 2026-09-22 both of the day's
+ *     batches did exactly this — eleven applications, none sent — because the
+ *     Trigger.dev bundle had no cv/ directory and reading the CV threw. Every
+ *     successful send until then had run from a laptop, so the deployed path
+ *     had never been exercised.
+ *
+ * So the sweep looks for the symptom (approved drafts that never left) rather
+ * than for one particular status. Resuming is safe by construction: sendBatch
+ * only sends drafts still marked 'approved', each is marked 'sent' the moment
+ * it goes, and the unique index on sends(to_address) refuses a repeat.
  */
 async function resumeStuckBatches(log: (s: string) => void, results: Record<string, string>) {
+  const testOnly = process.env.TEST_MODE === "1";
   const stuck = (await sql`
-    SELECT batch_id FROM digests
-    WHERE status = 'sending' AND decided_at < now() - interval '15 minutes'
+    SELECT DISTINCT dg.batch_id
+    FROM digests dg
+    JOIN outreach_drafts d ON d.batch_id = dg.batch_id AND d.status = 'approved'
+    WHERE (dg.status = 'sent'
+           OR (dg.status = 'sending' AND dg.decided_at < now() - interval '15 minutes'))
+      AND (${testOnly} = false OR dg.batch_id LIKE 'verify-%')
   `) as { batch_id: string }[];
   for (const { batch_id } of stuck) {
     try {

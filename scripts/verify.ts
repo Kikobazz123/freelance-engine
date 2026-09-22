@@ -14,6 +14,8 @@
 
 // Never message the real chat from a test run (see TELEGRAM_DRY in telegram.ts).
 process.env.TELEGRAM_DRY = "1";
+// TEST_MODE: no real email, and batch sweeps touch only verify-* batches.
+process.env.TEST_MODE = "1";
 
 import "dotenv/config";
 import { readFileSync, readdirSync, existsSync } from "node:fs";

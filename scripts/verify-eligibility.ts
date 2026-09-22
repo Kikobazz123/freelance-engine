@@ -7,6 +7,8 @@
 
 // Never message the real chat from a test run (see TELEGRAM_DRY in telegram.ts).
 process.env.TELEGRAM_DRY = "1";
+// TEST_MODE: no real email, and batch sweeps touch only verify-* batches.
+process.env.TEST_MODE = "1";
 
 import { eligibility, type Eligibility } from "../src/lib/eligibility.js";
 import { score } from "../src/lib/scoring.js";

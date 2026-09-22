@@ -49,7 +49,7 @@ for (const name of SUITES) {
     encoding: "utf8",
     shell: true,
     // Suites must never message his real chat; see TELEGRAM_DRY in telegram.ts.
-    env: { ...process.env, TELEGRAM_DRY: "1" },
+    env: { ...process.env, TELEGRAM_DRY: "1", TEST_MODE: "1" },
     timeout: 10 * 60_000,
   });
 

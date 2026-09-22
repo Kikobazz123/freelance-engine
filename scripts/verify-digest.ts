@@ -13,6 +13,8 @@
 
 // Never message the real chat from a test run (see TELEGRAM_DRY in telegram.ts).
 process.env.TELEGRAM_DRY = "1";
+// TEST_MODE: no real email, and batch sweeps touch only verify-* batches.
+process.env.TEST_MODE = "1";
 
 import "dotenv/config";
 import { sql, getState, setState } from "../src/lib/db.js";
@@ -128,6 +130,64 @@ try {
 
   const swept2 = await releaseDueBatches();
   ok(!(TEST_BATCH in swept2.results), "a released batch is not released twice");
+
+  /* ------------------------- approved drafts nobody sent are picked back up */
+  console.log("\n--- a batch marked done with unsent drafts is finished later ---");
+
+  await cleanupRows();
+  await sql`
+    INSERT INTO listings (id, source, tier, lane, title, url, fit_score)
+    VALUES (${TEST_LISTING}, 'verify', 'A', 'auto', 'verify digest listing',
+            'https://example.invalid/verify', 90)
+    ON CONFLICT (id) DO NOTHING
+  `;
+  // Exactly the 2026-09-22 shape: batch says 'sent', drafts still 'approved'
+  // because the send threw before the first email (no CV in the bundle).
+  await sql`
+    INSERT INTO digests (batch_id, n_drafts, status, decided_at)
+    VALUES (${TEST_BATCH}, 1, 'sent', now() - interval '2 hours')
+  `;
+  await sql`
+    INSERT INTO outreach_drafts (batch_id, listing_id, to_address, subject, salutation, body, status)
+    VALUES (${TEST_BATCH}, ${TEST_LISTING}, 'verify-stranded@example.invalid',
+            's', 'Dear team,', 'b', 'approved')
+  `;
+  // Suppressed, so the resume proves it picked the batch up without sending.
+  await sql`
+    INSERT INTO suppression (email, reason) VALUES ('verify-stranded@example.invalid', 'verify')
+    ON CONFLICT (email) DO NOTHING
+  `;
+  const resumed = await releaseDueBatches();
+  ok(TEST_BATCH in resumed.results, "a 'sent' batch with approved drafts is resumed",
+    JSON.stringify(resumed.results).slice(0, 120));
+  const after = (await sql`
+    SELECT status FROM outreach_drafts WHERE batch_id = ${TEST_BATCH}
+  `) as { status: string }[];
+  ok(after[0]?.status === "skipped", "the stranded draft is resolved, not left approved", after[0]?.status);
+  await sql`DELETE FROM suppression WHERE email = 'verify-stranded@example.invalid'`;
+
+  // And the sweep must leave everything that is NOT a test batch alone. Without
+  // this guard the suite released two real batches and sent five applications.
+  const REAL = "20260101-real";
+  await sql`DELETE FROM outreach_drafts WHERE batch_id = ${REAL}`;
+  await sql`DELETE FROM digests WHERE batch_id = ${REAL}`;
+  await sql`
+    INSERT INTO digests (batch_id, n_drafts, status, auto_release_at)
+    VALUES (${REAL}, 1, 'pending', now() - interval '1 hour')
+  `;
+  await sql`
+    INSERT INTO outreach_drafts (batch_id, listing_id, to_address, subject, salutation, body, status)
+    VALUES (${REAL}, ${TEST_LISTING}, 'verify-notmine@example.invalid', 's', 'Dear team,', 'b', 'draft')
+  `;
+  const guarded = await releaseDueBatches();
+  ok(!(REAL in guarded.results), "a non-test batch is untouched during a test run",
+    JSON.stringify(guarded.results).slice(0, 100));
+  const untouched = (await sql`
+    SELECT status FROM digests WHERE batch_id = ${REAL}
+  `) as { status: string }[];
+  ok(untouched[0]?.status === "pending", "it is still pending afterwards", untouched[0]?.status);
+  await sql`DELETE FROM outreach_drafts WHERE batch_id = ${REAL}`;
+  await sql`DELETE FROM digests WHERE batch_id = ${REAL}`;
 
   /* -------------------------------------------------- the send-side brakes */
   console.log("\n--- sendBatch refuses to run while held ---");

@@ -30,6 +30,20 @@ console.log(`daily cap    : ${cap}`);
 console.log(`sent today   : ${already}`);
 console.log(`slots left   : ${Math.max(0, cap - already)}`);
 console.log(`uncontacted  : ${cand.n} eligible candidates`);
+// Is the scheduler alive? Each Inngest job writes a heartbeat when it finishes.
+const beats = (await sql`
+  SELECT key, value, updated_at FROM pipeline_state
+  WHERE key LIKE 'cron:%' ORDER BY updated_at DESC
+`) as { key: string; value: { ok: boolean; detail: string }; updated_at: string | Date }[];
+console.log(`\nscheduled jobs (last run):`);
+if (!beats.length) console.log("  none yet — no scheduled job has completed since heartbeats were added");
+for (const b of beats) {
+  const t = b.updated_at instanceof Date ? b.updated_at : new Date(b.updated_at);
+  const mins = Math.round((Date.now() - t.getTime()) / 60000);
+  console.log(`  ${b.key.replace("cron:", "").padEnd(14)} ${b.value?.ok ? "ok    " : "FAILED"} ` +
+    `${mins < 90 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`}  ${String(b.value?.detail ?? "").slice(0, 60)}`);
+}
+
 console.log(`\nlive sends so far:`);
 for (const s of sends) {
   const t = s.sent_at instanceof Date ? s.sent_at.toISOString() : String(s.sent_at);

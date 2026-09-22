@@ -91,7 +91,10 @@ export async function gmailSend(opts: {
   dryRun: boolean;
   attachment?: { filename: string; contentType: string; data: Buffer };
 }): Promise<{ id: string; threadId: string } | null> {
-  if (opts.dryRun) return null;
+  // TEST_MODE is the last line: a verify suite must never put mail on the wire,
+  // whatever path it reached here by. One did, and five real applications went
+  // out during a test run.
+  if (opts.dryRun || process.env.TEST_MODE === "1") return null;
 
   const addr = opts.from ?? process.env.GMAIL_SENDER;
   if (!addr) throw new Error("GMAIL_SENDER is not set");
