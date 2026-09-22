@@ -16,7 +16,26 @@ function creds() {
 
 export type Button = { text: string; callback_data: string };
 
+/**
+ * TELEGRAM_DRY=1 — used by every verify suite — sends nothing.
+ *
+ * The suites used to call the real Bot API, so each run posted fake "APPROVED —
+ * paste this into Freelancer-ai-agent / test proposal body" messages into his
+ * chat, and Telegram's rate limit on those bursts made a test fail at random.
+ * In dry mode every method succeeds with a fake message, except
+ * answerCallbackQuery, which fails exactly as an expired button does — the
+ * common real case, and the one the non-fatal handling exists for.
+ */
+let fakeId = 900_000;
+function dryCall(method: string): unknown {
+  if (method === "answerCallbackQuery") {
+    throw new Error("Telegram answerCallbackQuery failed: Bad Request: query is too old (TELEGRAM_DRY)");
+  }
+  return { message_id: ++fakeId, chat: { id: 0 } };
+}
+
 async function call(method: string, body: Record<string, unknown> = {}) {
+  if (process.env.TELEGRAM_DRY === "1") return dryCall(method);
   const { token } = creds();
   const r = await fetch(`${API}/bot${token}/${method}`, {
     method: "POST",
@@ -206,18 +225,34 @@ export async function getUpdates(offset: number, timeoutSec = 0): Promise<{
 
   for (const u of result ?? []) {
     next = Math.max(next, u.update_id + 1);
-    if (u.callback_query) {
-      callbacks.push({
+    const p = parseUpdate(u);
+    if (p.callback) callbacks.push(p.callback);
+    if (p.command) commands.push(p.command);
+  }
+
+  return { callbacks, commands, nextOffset: next };
+}
+
+/**
+ * One Telegram update, as either a button press or a slash command.
+ *
+ * Shared by the poller above and the webhook in api/telegram.ts, so a press is
+ * understood identically whichever path delivers it.
+ */
+export function parseUpdate(u: any): { callback?: Callback; command?: Command } {
+  if (u?.callback_query) {
+    return {
+      callback: {
         id: u.callback_query.id,
         data: u.callback_query.data ?? "",
         messageId: u.callback_query.message?.message_id,
         chatId: u.callback_query.message?.chat?.id,
         from: u.callback_query.from?.username ?? String(u.callback_query.from?.id ?? "?"),
-      });
-    } else if (u.message?.text?.startsWith("/")) {
-      commands.push({ text: u.message.text.trim(), chatId: u.message.chat.id });
-    }
+      },
+    };
   }
-
-  return { callbacks, commands, nextOffset: next };
+  if (u?.message?.text?.startsWith("/")) {
+    return { command: { text: u.message.text.trim(), chatId: u.message.chat.id } };
+  }
+  return {};
 }

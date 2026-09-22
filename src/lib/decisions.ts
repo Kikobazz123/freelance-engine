@@ -110,11 +110,19 @@ export async function approve(cbId: string, proposalId: number): Promise<string>
   await markCard(r, "✅ *APPROVED*", note);
 
   // Plain text, unescaped, so it can be copied straight into the platform.
-  await sendPlain(
+  // Non-fatal: the approval is already recorded, and a Telegram hiccup here
+  // used to throw after the commit — the same "recorded and invisible" failure
+  // answerCallback was fixed for. One retry, then a warning.
+  const paste =
     `APPROVED — paste this into ${r.source}\n` +
     `Rate: $${r.rate_quoted ?? "?"}/hr\n` +
-    `${r.url}\n\n${r.body}`,
-  );
+    `${r.url}\n\n${r.body}`;
+  try {
+    await sendPlain(paste);
+  } catch {
+    try { await new Promise((ok) => setTimeout(ok, 1500)); await sendPlain(paste); }
+    catch (e) { console.warn(`approve: full text not delivered: ${String((e as Error).message).slice(0, 120)}`); }
+  }
 
   return "approved";
 }
@@ -335,7 +343,36 @@ export async function releaseDueBatches(
     }
     log(`  ${d.batch_id} (${d.n_drafts} drafts) -> ${results[d.batch_id]}`);
   }
+
+  await resumeStuckBatches(log, results);
   return { released: due.length, results };
+}
+
+/**
+ * Finish a batch whose send was cut off.
+ *
+ * A serverless run has a hard time limit (five minutes on the free Vercel
+ * plan). If it ends mid-batch, the batch stays 'sending' and nothing ever picks
+ * it up again. Resuming is safe by construction: sendBatch only sends drafts
+ * still marked 'approved' (each is marked 'sent' the moment it goes), and the
+ * unique index on sends(to_address) refuses a second send to anyone.
+ */
+async function resumeStuckBatches(log: (s: string) => void, results: Record<string, string>) {
+  const stuck = (await sql`
+    SELECT batch_id FROM digests
+    WHERE status = 'sending' AND decided_at < now() - interval '15 minutes'
+  `) as { batch_id: string }[];
+  for (const { batch_id } of stuck) {
+    try {
+      const r = await sendBatch(batch_id);
+      await sql`UPDATE digests SET status = 'sent' WHERE batch_id = ${batch_id}`;
+      if (r.sentList.length) await sendPlain(confirmationText(batch_id, r.sentList, true));
+      results[batch_id] = `resumed: ${r.sent} more sent`;
+    } catch (e) {
+      results[batch_id] = `resume error: ${String((e as Error).message).slice(0, 120)}`;
+    }
+    log(`  ${batch_id} was stuck in 'sending' -> ${results[batch_id]}`);
+  }
 }
 
 /**

@@ -11,6 +11,9 @@
  *   tsx scripts/verify-digest.ts
  */
 
+// Never message the real chat from a test run (see TELEGRAM_DRY in telegram.ts).
+process.env.TELEGRAM_DRY = "1";
+
 import "dotenv/config";
 import { sql, getState, setState } from "../src/lib/db.js";
 import { approveAll, skipAll, holdBatch, releaseDueBatches } from "../src/lib/decisions.js";

@@ -24,11 +24,16 @@
     "now": "tsx scripts/run-now.ts",
     "digest": "tsx scripts/digest.ts",
     "verify:chain": "tsx scripts/verify.ts && tsx scripts/verify-extra.ts && tsx scripts/verify-callbacks.ts && tsx scripts/verify-lane-a.ts && tsx scripts/verify-digest.ts",
-    "kits": "tsx scripts/kits.ts"
+    "kits": "tsx scripts/kits.ts",
+    "dev:functions": "tsx scripts/dev-server.ts",
+    "dev:inngest": "npx --yes inngest-cli@latest dev -u http://localhost:3000/api/inngest --no-discovery",
+    "cutover": "node scripts/cutover.mjs"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^0.10.4",
     "@trigger.dev/sdk": "4.4.0",
-    "@neondatabase/serverless": "^0.10.4"
+    "@vercel/functions": "^3.9.9",
+    "inngest": "^4.20.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

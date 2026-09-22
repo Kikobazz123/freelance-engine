@@ -4,6 +4,9 @@
  *   tsx scripts/verify-kits.ts
  */
 
+// Never message the real chat from a test run (see TELEGRAM_DRY in telegram.ts).
+process.env.TELEGRAM_DRY = "1";
+
 import "dotenv/config";
 import { readFileSync } from "node:fs";
 import { sql } from "../src/lib/db.js";

@@ -8,6 +8,9 @@
  *   tsx scripts/verify-lane-a.ts
  */
 
+// Never message the real chat from a test run (see TELEGRAM_DRY in telegram.ts).
+process.env.TELEGRAM_DRY = "1";
+
 import "dotenv/config";
 import { sql, guard, getState, setState } from "../src/lib/db.js";
 import { gmailSend } from "../src/lib/gmail.js";

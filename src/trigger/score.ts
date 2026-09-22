@@ -1,26 +1,12 @@
 import { schedules, logger } from "@trigger.dev/sdk";
-import { sql, getState } from "../lib/db.js";
-import { rescoreListings } from "../lib/rescore.js";
+import { runScoreListings } from "../jobs/score.js";
 
 /**
- * Score everything unscored, plus anything re-seen recently (freshness decays,
- * so a listing's score is not stable over time).
+ * Thin Trigger.dev wrapper. The job itself lives in src/jobs/score.ts so the
+ * Inngest function can run exactly the same code. Deleted at cutover.
  */
 export const scoreListings = schedules.task({
   id: "score",
   cron: { pattern: "0 5 * * *", timezone: "Africa/Lagos" },
-  run: async () => {
-    const floor = await getState<number>("rate_floor_hourly", 35);
-
-    // Shared with scripts/rescore.ts; see src/lib/rescore.ts for why the task
-    // must not assemble its own Scorable.
-    const { scored, vetoed } = await rescoreListings({ sinceDays: 2, floor });
-
-    const [{ n: shortlist }] = (await sql`
-      SELECT count(*)::int AS n FROM listings WHERE fit_score >= 65
-    `) as { n: number }[];
-
-    logger.info("scoring complete", { scored, vetoed, shortlist, rateFloor: floor });
-    return { scored, vetoed, shortlist };
-  },
+  run: () => runScoreListings((msg, data) => logger.info(msg, (data ?? {}) as Record<string, unknown>)),
 });

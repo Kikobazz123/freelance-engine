@@ -1,0 +1,14 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "functions": {
+    "api/inngest.ts": {
+      "maxDuration": 300,
+      "includeFiles": "cv/*.pdf"
+    },
+    "api/telegram.ts": {
+      "maxDuration": 300,
+      "includeFiles": "cv/*.pdf"
+    }
+  }
+}

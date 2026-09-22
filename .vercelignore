@@ -1,0 +1,17 @@
+# Vercel's CLI does NOT read .gitignore. Without this file a deploy would upload
+# .env (every secret) and data/ (third parties' contact addresses) to Vercel.
+# Secrets reach Vercel as environment variables, set separately.
+.env
+.env.*
+!.env.example
+data/
+node_modules/
+.trigger/
+.claude/
+*.log
+profile/
+cv/*.docx
+cv/cv-ats.txt
+cv/cv.html
+scripts/build_docx.py
+# cv/*.pdf is deliberately NOT ignored: every email attaches it.

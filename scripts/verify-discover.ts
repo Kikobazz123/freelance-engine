@@ -9,6 +9,9 @@
  *   tsx scripts/verify-discover.ts
  */
 
+// Never message the real chat from a test run (see TELEGRAM_DRY in telegram.ts).
+process.env.TELEGRAM_DRY = "1";
+
 import { employerContact, pageText, hopCandidates, TRANSIENT, hiringInbox } from "../src/lib/discover.js";
 import { roleMismatch, score, foreignStack } from "../src/lib/scoring.js";
 import { extractContact } from "../src/lib/contact.js";

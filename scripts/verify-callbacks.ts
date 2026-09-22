@@ -9,6 +9,9 @@
  *   tsx scripts/verify-callbacks.ts
  */
 
+// Never message the real chat from a test run (see TELEGRAM_DRY in telegram.ts).
+process.env.TELEGRAM_DRY = "1";
+
 import "dotenv/config";
 import { sql, bidBudget, platformOf, FREE_ALLOWANCE } from "../src/lib/db.js";
 import { approve, skip, fullText } from "../src/lib/decisions.js";

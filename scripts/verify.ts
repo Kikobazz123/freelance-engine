@@ -12,8 +12,11 @@
  *   tsx scripts/verify.ts
  */
 
+// Never message the real chat from a test run (see TELEGRAM_DRY in telegram.ts).
+process.env.TELEGRAM_DRY = "1";
+
 import "dotenv/config";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { guard, getState, setState } from "../src/lib/db.js";
 import { gmailSend } from "../src/lib/gmail.js";
@@ -86,21 +89,28 @@ console.log("\n--- marketplace ToS boundary ---");
 
 // Upwork/Fiverr/Freelancer permanently ban tools that submit without a human
 // click. The guarantee is structural: no code here posts to a marketplace.
-const srcDir = "src";
+// Every directory that ships code: src/ for the engine, api/ for the Vercel
+// functions (the Telegram webhook and the Inngest endpoint live there, outside
+// src/, and a scan of src alone would have missed a POST added to them).
 const files: string[] = [];
-(function walk(d: string) {
+function walk(d: string) {
+  if (!existsSync(d)) return;
   for (const e of readdirSync(d, { withFileTypes: true })) {
     const p = join(d, e.name);
     e.isDirectory() ? walk(p) : p.endsWith(".ts") && files.push(p);
   }
-})(srcDir);
+}
+["src", "api"].forEach(walk);
 
 const code = files.map((f) => `${f}\n${readFileSync(f, "utf8")}`).join("\n");
 const marketplacePost =
   /fetch\([^)]*(upwork|fiverr|freelancer\.com|peopleperhour|contra)\.com[^)]*\)\s*,?\s*\{[^}]*method:\s*["']POST/i;
 check("no POST to any marketplace domain", !marketplacePost.test(code));
 check("dispatch queues approve lane rather than sending",
-  /pending_approval/.test(readFileSync("src/trigger/dispatch.ts", "utf8")));
+  /pending_approval/.test(readFileSync("src/jobs/dispatch.ts", "utf8")));
+check("the scan covers the deployed api/ directory, not just src/",
+  files.some((f) => f.replace(/\\/g, "/").startsWith("src/jobs/")) &&
+  (!existsSync("api") || files.some((f) => f.replace(/\\/g, "/").startsWith("api/"))));
 
 console.log("\n--- gmail dry run ---");
 

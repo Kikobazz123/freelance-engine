@@ -5,6 +5,9 @@
  *   tsx scripts/verify-ranking.ts
  */
 
+// Never message the real chat from a test run (see TELEGRAM_DRY in telegram.ts).
+process.env.TELEGRAM_DRY = "1";
+
 import { score, titleFit, notTechnical, type Scorable } from "../src/lib/scoring.js";
 
 let pass = 0, fail = 0;

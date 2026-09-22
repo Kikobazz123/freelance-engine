@@ -5,6 +5,9 @@
  *   tsx scripts/verify-eligibility.ts
  */
 
+// Never message the real chat from a test run (see TELEGRAM_DRY in telegram.ts).
+process.env.TELEGRAM_DRY = "1";
+
 import { eligibility, type Eligibility } from "../src/lib/eligibility.js";
 import { score } from "../src/lib/scoring.js";
 

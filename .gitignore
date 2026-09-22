@@ -20,3 +20,5 @@ data/
 
 # Your own identity and profile
 src/config.ts
+
+.vercel/
