@@ -106,8 +106,10 @@ function walk(d: string) {
 
 const code = files.map((f) => `${f}\n${readFileSync(f, "utf8")}`).join("\n");
 const marketplacePost =
-  /fetch\([^)]*(upwork|fiverr|freelancer\.com|peopleperhour|contra)\.com[^)]*\)\s*,?\s*\{[^}]*method:\s*["']POST/i;
+  /fetch\(\s*[`'"][^`'"]*\b(upwork|fiverr|freelancer|peopleperhour|contra)\.com[^`'"]*[`'"]\s*,\s*\{[^}]*method:\s*["'`]POST/i;
 check("no POST to any marketplace domain", !marketplacePost.test(code));
+check("the pattern catches a real fetch POST (control)",
+  marketplacePost.test(`fetch("https://www.upwork.com/api/x", { method: "POST" })`));
 check("dispatch queues approve lane rather than sending",
   /pending_approval/.test(readFileSync("src/jobs/dispatch.ts", "utf8")));
 check("the scan covers the deployed api/ directory, not just src/",
