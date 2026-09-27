@@ -19,8 +19,15 @@ import { createServer, type ServerResponse } from "node:http";
 import { exec } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
-const PORT = 53_682;
-const REDIRECT_URI = `http://127.0.0.1:${PORT}/callback`;
+// Must match a redirect URI registered on the Google OAuth client.
+// The documented default lives in .env.example.
+const REDIRECT_URI = process.env.OAUTH_REDIRECT_URI ?? "";
+if (!REDIRECT_URI) {
+  console.error("OAUTH_REDIRECT_URI is not set. Copy it from .env.example into .env.");
+  process.exit(1);
+}
+const redirect = new URL(REDIRECT_URI);
+const PORT = Number(redirect.port);
 
 // Both scopes. gmail.send alone cannot list or read messages.
 const SCOPES = [
@@ -77,7 +84,7 @@ function shutdown(res: ServerResponse, status: number, body: string, code: numbe
 }
 
 const server = createServer(async (req, res) => {
-  if (!req.url?.startsWith("/callback")) {
+  if (!req.url?.startsWith(redirect.pathname)) {
     res.writeHead(404).end();
     return;
   }
@@ -128,7 +135,7 @@ const server = createServer(async (req, res) => {
   shutdown(res, 200, "Done. Refresh token written to .env. You can close this tab.", hasSend && hasRead ? 0 : 1);
 });
 
-server.listen(PORT, "127.0.0.1", () => {
+server.listen(PORT, redirect.hostname, () => {
   console.log("Opening browser for Google consent...");
   console.log("If it does not open, paste this URL yourself:\n");
   console.log(authUrl.toString() + "\n");

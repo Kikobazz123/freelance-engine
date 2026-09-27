@@ -2,10 +2,10 @@
  * Serve the Vercel functions locally, exactly as deployed.
  *
  *   tsx scripts/dev-server.ts          then, in another terminal:
- *   npx inngest-cli@latest dev -u http://localhost:3000/api/inngest
+ *   npm run dev:inngest                (points Inngest at $BASE_URL/api/inngest)
  *
  * The Inngest dev server needs no account: it discovers the functions, shows
- * them at http://localhost:8288, and can run any of them on demand.
+ * them in its own local UI (port 8288), and can run any of them on demand.
  */
 import "./_dev-env.js";
 import "dotenv/config";
