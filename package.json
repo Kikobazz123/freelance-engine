@@ -28,7 +28,11 @@
     "dev:functions": "tsx scripts/dev-server.ts",
     "dev:inngest": "node scripts/dev-inngest.mjs",
     "cutover": "node scripts/cutover.mjs",
-    "job": "node scripts/job.mjs"
+    "job": "node scripts/job.mjs",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint ."
   },
   "dependencies": {
     "@neondatabase/serverless": "^0.10.4",
@@ -37,10 +41,16 @@
     "inngest": "^4.20.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^5.0.2",
     "dotenv": "^16.4.5",
+    "eslint": "^10.11.0",
+    "globals": "^17.12.0",
     "trigger.dev": "4.4.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.0"
+    "typescript": "^5.6.0",
+    "typescript-eslint": "^8.70.1",
+    "vitest": "^5.0.2"
   }
 }

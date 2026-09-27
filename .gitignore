@@ -22,3 +22,5 @@ data/
 src/config.ts
 
 .vercel/
+
+coverage/
