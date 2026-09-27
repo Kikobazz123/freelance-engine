@@ -1,7 +1,7 @@
 /**
  * Contact discovery: widening who the pipeline can write to must not mean
  * emailing someone who never invited it. Fixtures are real false positives from
- * the first dry run. Ported from scripts/verify-discover.ts; no network.
+ * the first dry run. Formerly scripts/verify-discover.ts; no network.
  */
 import { describe, expect, it } from "vitest";
 import { employerContact, hiringInbox, hopCandidates, pageText, TRANSIENT } from "../src/lib/discover.js";

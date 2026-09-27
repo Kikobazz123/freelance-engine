@@ -29,10 +29,7 @@ const SUITES = [
   "verify-callbacks",
   "verify-lane-a",
   "verify-digest",
-  "verify-discover",
-  "verify-eligibility",
   "verify-kits",
-  "verify-ranking",
 ];
 
 type Result = {

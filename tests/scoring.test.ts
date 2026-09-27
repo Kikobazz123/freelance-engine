@@ -1,5 +1,5 @@
 /**
- * Ranking and vetoes. Ported from scripts/verify-ranking.ts and the scoring half
+ * Ranking and vetoes. Formerly scripts/verify-ranking.ts, plus the scoring half
  * of scripts/verify-extra.ts. Fixtures are real titles from the feeds.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";

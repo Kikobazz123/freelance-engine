@@ -1,7 +1,7 @@
 /**
  * The model produces, deterministic code decides. validateClaims is the gate
  * that stops a draft from claiming experience the profile cannot back up.
- * Cases ported from scripts/verify-discover.ts.
+ * Cases carried over from the former scripts/verify-discover.ts.
  */
 import { describe, expect, it } from "vitest";
 import { claimsOk, validateClaims } from "../src/lib/claims.js";

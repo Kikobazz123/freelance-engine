@@ -185,7 +185,7 @@ tests, and the gitignored `src/config.ts` resolves to `src/config.example.ts`.
 CI runs lint, typecheck and tests on every push.
 
 ```bash
-npm run verify      # nine integration suites against a real Neon database
+npm run verify      # six integration suites against a real Neon database
 npm run dry-run     # full pipeline, writes every artifact for review, sends nothing
 npm run check       # live credential check against every provider
 ```

@@ -1,6 +1,6 @@
 /**
  * Eligibility against real location strings, copied verbatim from the feeds on
- * 2026-09-22. Ported from scripts/verify-eligibility.ts.
+ * 2026-09-22. Formerly scripts/verify-eligibility.ts.
  */
 import { describe, expect, it } from "vitest";
 import { eligibility, type Eligibility } from "../src/lib/eligibility.js";
