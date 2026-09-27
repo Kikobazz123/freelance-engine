@@ -22,6 +22,8 @@
  *   OpenRouter :free pool, shared and frequently 429
  */
 
+import { IDENTITY } from "../config.js";
+
 export type LlmResult = {
   text: string;
   provider: "groq" | "gemini" | "openrouter" | "stub";
@@ -206,5 +208,4 @@ export async function completeValidated(
   }
 
   return { ...second, violations: validate(second.text), retried: true };
-}import { IDENTITY } from "../config.js";
-
+}
