@@ -3,8 +3,12 @@
 A daily pipeline that finds contract work, scores it, writes a tailored application
 for each, and refuses to send anything it cannot substantiate.
 
+[![CI](https://github.com/Kikobazz123/freelance-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/Kikobazz123/freelance-engine/actions/workflows/ci.yml)
+
 Built by **[Lordmark Dorgu](https://github.com/Kikobazz123)** · MIT licensed ·
 runs entirely on free tiers.
+
+<!-- TODO: add screenshot (a Telegram approval card works well) -->
 
 ---
 
@@ -30,8 +34,14 @@ submission. So **there is deliberately no code path in this repository that post
 a marketplace**, and a test asserts that structurally rather than by policy:
 
 ```ts
-check("no POST to any marketplace domain", !marketplacePost.test(code));
+it("has no POST to any marketplace domain", () => {
+  expect(marketplacePost.test(code)).toBe(false);
+});
 ```
+
+The scan covers `src/` and `api/`, and a control case proves the pattern actually
+fires on a real `fetch(url, { method: "POST" })`. (It did not always: see
+[Tests](#tests).)
 
 Lane A is narrower than it looks. It writes only to an address the poster published
 *asking to be contacted* — answering an invitation, not cold outreach. That
@@ -125,9 +135,14 @@ anyway. A negative instruction in a prompt is a request, not a guarantee.
 
 ## Stack
 
-TypeScript · Trigger.dev (durable scheduled jobs) · Neon serverless Postgres ·
-Gmail API · Telegram Bot API · Groq / Gemini / OpenRouter with provider *and* model
-failover.
+TypeScript · Inngest (cron schedules with retries) served from Vercel functions ·
+Neon serverless Postgres · Gmail API · Telegram Bot API · Groq / Gemini / OpenRouter
+with provider *and* model failover · Vitest · GitHub Actions.
+
+Scheduling moved from Trigger.dev to Inngest because the Trigger.dev free plan
+capped runs at about 5,000 a month and the old 5-minute Telegram poll alone used
+~6,000. Telegram button presses now arrive at a webhook instead of being polled.
+The job bodies in `src/jobs/` did not change; only the clock around them did.
 
 Free-tier model churn is treated as the normal case, not an edge case. On one
 credential check all three configured models were dead simultaneously while all three
@@ -148,17 +163,36 @@ src/lib/
   gmail.ts      Gmail REST with MIME attachments
   telegram.ts   Bot API, approval cards, callbacks
   decisions.ts  approve / skip, idempotent under redelivery
-src/trigger/    nine scheduled tasks
-scripts/        four verification suites, dry run, credential check
+src/jobs/       the job bodies (harvest, score, generate, dispatch, send, ...)
+src/inngest/    the schedules: one cron per job, plus a heartbeat per run
+api/            Vercel functions: the Inngest endpoint and the Telegram webhook
+src/trigger/    the earlier Trigger.dev task wrappers around the same jobs
+tests/          Vitest unit tests (no network, no database)
+scripts/        integration suites against a real database, dry run, ops tools
 ```
 
-## Verification
+## Tests
 
 ```bash
-npm run verify      # 62 assertions across four suites
+npm test            # Vitest: scoring, eligibility, market tiers, claim validation,
+                    # contact discovery, the marketplace boundary, LLM failover
+npm run lint
+npm run typecheck
+```
+
+These need no network, database or keys: `fetch` is stubbed for the failover
+tests, and the gitignored `src/config.ts` resolves to `src/config.example.ts`.
+CI runs lint, typecheck and tests on every push.
+
+```bash
+npm run verify      # nine integration suites against a real Neon database
 npm run dry-run     # full pipeline, writes every artifact for review, sends nothing
 npm run check       # live credential check against every provider
 ```
+
+The integration suites cover what a unit test cannot: the send guard read from the
+database, idempotent Telegram callbacks, bid spending, batch release. They run with
+`TELEGRAM_DRY=1` and `TEST_MODE=1`, so they never message the real chat or send mail.
 
 The suites are the point, not decoration. Bugs they caught before production:
 
@@ -174,6 +208,9 @@ The suites are the point, not decoration. Bugs they caught before production:
   *after* the decision had already been committed — recorded and invisible
 - a test that restored the pipeline to "safe" so aggressively it silently
   disarmed a deliberately live deployment
+- the marketplace-POST check itself: its regex expected `fetch(url), {...}`, a
+  shape no real call has, so it could never fail. Porting it to Vitest with a
+  control case exposed that; the pattern now matches real calls
 
 ## Setup
 
@@ -185,6 +222,10 @@ npm run migrate
 npm run check
 npm run dry-run                   # read the output before going near live mode
 ```
+
+To run the scheduled functions locally, serve them with `npx tsx scripts/dev-server.ts`
+and, in a second terminal, `npm run dev:inngest`. That points the Inngest dev server
+at `$BASE_URL/api/inngest`; the default is in `.env.example`.
 
 `src/config.ts` is the single source of truth for every claim. Be strict with it —
 anything in it can end up in an email to a real hiring manager.
