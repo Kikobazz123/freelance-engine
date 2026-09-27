@@ -49,7 +49,8 @@ export async function runDispatch(log: Log = () => {}) {
       ORDER BY l.rank_score DESC NULLS LAST, l.fit_score DESC
     `) as any[];
 
-    let queued = 0, sent = 0, held = 0, budgetBlocked = 0, belowBar = 0;
+    const sent = 0; // lane B never sends; reported for a uniform summary
+    let queued = 0, held = 0, budgetBlocked = 0, belowBar = 0;
     const budgets = new Map<Platform, { left: number; unit: string; allowance: number }>();
 
     // ---- Lane B: ration, then queue for a human click. Never auto-sent.

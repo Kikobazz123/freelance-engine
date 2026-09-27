@@ -89,8 +89,8 @@ const CB = "test-callback-id";
 {
   const before = (await bidBudget("freelancer")).spent;
   const id = await reset("Freelancer-ai-agent");
-  let r = "";
-  try { r = await approve(CB, id); } catch { r = "telegram_error"; }
+  // Only the side effects matter; a Telegram error is expected under TELEGRAM_DRY.
+  try { await approve(CB, id); } catch { /* ignored */ }
 
   const [p] = (await sql`SELECT status, bid_cost, bid_platform FROM proposals WHERE id = ${id}`) as any[];
   const after = (await bidBudget("freelancer")).spent;
@@ -102,8 +102,7 @@ const CB = "test-callback-id";
 
   /* 2. pressing Approve again spends NOTHING */
   const beforeDup = (await bidBudget("freelancer")).spent;
-  let dup = "";
-  try { dup = await approve(CB, id); } catch { dup = "telegram_error"; }
+  try { await approve(CB, id); } catch { /* ignored */ }
   const afterDup = (await bidBudget("freelancer")).spent;
   check("duplicate approve does not spend a second bid",
     afterDup === beforeDup, `${beforeDup} -> ${afterDup}`);
@@ -151,8 +150,8 @@ const CB = "test-callback-id";
     UPDATE bid_budget SET spent = allowance
     WHERE platform = 'freelancer' AND period = date_trunc('month', now())::date
   `;
-  let r = "";
-  try { r = await approve(CB, id); } catch { r = "telegram_error"; }
+  // Only the side effects matter; a Telegram error is expected under TELEGRAM_DRY.
+  try { await approve(CB, id); } catch { /* ignored */ }
   const [p] = (await sql`SELECT status FROM proposals WHERE id = ${id}`) as any[];
   const after = await bidBudget("freelancer");
   check("approve refused when budget is exhausted",

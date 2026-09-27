@@ -14,7 +14,7 @@
 
 import "dotenv/config";
 import { writeFileSync, existsSync, statSync } from "node:fs";
-import { sql, guard, getState, bidBudget, platformOf } from "../src/lib/db.js";
+import { sql, guard, bidBudget } from "../src/lib/db.js";
 import { harvestAll } from "../src/lib/sources.js";
 import { score } from "../src/lib/scoring.js";
 import { writeProposal } from "../src/lib/proposal.js";

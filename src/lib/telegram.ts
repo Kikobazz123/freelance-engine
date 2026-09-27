@@ -137,7 +137,7 @@ export async function approvalCard(p: {
     // Telegram expects answerCallbackQuery within ~10s, and the scheduled poller
     // runs every 5 minutes — so the button toast will usually never appear. Say
     // so on the card rather than letting a press look like it did nothing.
-    `_Tap registers within 5 min \— run_ \`npm run approvals\` _for instant_`,
+    `_Tap registers within 5 min — run_ \`npm run approvals\` _for instant_`,
   ].join("\n");
 
   return send(text, [[
