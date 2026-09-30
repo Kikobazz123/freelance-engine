@@ -8,6 +8,10 @@ for each, and refuses to send anything it cannot substantiate.
 Built by **[Lordmark Dorgu](https://github.com/Kikobazz123)** · MIT licensed ·
 runs entirely on free tiers.
 
+[![Watch the 20-second demo](docs/video/demo-poster.jpg)](docs/video/demo.mp4)
+
+*20-second walkthrough (click to play).*
+
 ![An approval card: the message and buttons approvalCard() sends, rendered with a fixture listing](docs/approval-card.png)
 
 ---
